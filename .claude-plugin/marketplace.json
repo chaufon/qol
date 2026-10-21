@@ -1,0 +1,20 @@
+{
+  "name": "qol",
+  "description": "Quality-of-life mods for Claude Code",
+  "owner": {
+    "name": "Chaufon",
+    "url": "https://github.com/chaufon"
+  },
+  "plugins": [
+    {
+      "name": "usage-footer",
+      "source": "./plugins/usage-footer",
+      "description": "Shows context usage, the 5-hour rate-limit window and its reset time at the right of the prompt footer"
+    },
+    {
+      "name": "grammar-tracker",
+      "source": "./plugins/grammar-tracker",
+      "description": "Checks the English grammar of each prompt, counts repeated mistakes, and shows the check in a band and a pane"
+    }
+  ]
+}

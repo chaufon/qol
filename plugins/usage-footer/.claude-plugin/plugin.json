@@ -1,0 +1,8 @@
+{
+  "name": "usage-footer",
+  "version": "0.1.1",
+  "description": "Shows context usage, the 5-hour rate-limit window and its reset time at the right of the prompt footer",
+  "license": "MIT",
+  "author": { "name": "Chaufon", "url": "https://github.com/chaufon" },
+  "types": "./types/index.d.ts"
+}
