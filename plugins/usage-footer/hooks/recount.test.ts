@@ -47,7 +47,7 @@ for (const command of ['clear', 'rewind', 'resume']) {
 
     await run($, command)
 
-    expect(await footer($)).toContain('📚 21k (11%)')
+    expect(await footer($)).toContain('📚 21k 11% of 200k')
   })
 }
 
@@ -57,7 +57,7 @@ test('a new session shows the estimated size of its conversation', async ($, on)
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect(await footer($)).toContain('📚 21k (11%)')
+  expect(await footer($)).toContain('📚 21k 11% of 200k')
 })
 
 test('/model keeps the size and measures it against the new window', async ($, on) => {
@@ -67,7 +67,7 @@ test('/model keeps the size and measures it against the new window', async ($, o
 
   await run($, 'model')
 
-  expect(await footer($)).toContain('📚 122k (12%)')
+  expect(await footer($)).toContain('📚 122k 12% of 1M')
 })
 
 test('a choice made in the picker shows on the recount 3 seconds later', async ($, on) => {
@@ -80,7 +80,7 @@ test('a choice made in the picker shows on the recount 3 seconds later', async (
   usage.estimate = 48_000
   await clock.advance(3_000)
 
-  expect(await footer($)).toContain('📚 48k (24%)')
+  expect(await footer($)).toContain('📚 48k 24% of 200k')
 })
 
 test('other commands leave the size alone', async ($, on) => {
@@ -90,7 +90,7 @@ test('other commands leave the size alone', async ($, on) => {
 
   await run($, 'help')
 
-  expect(await footer($)).toContain('📚 122k (61%)')
+  expect(await footer($)).toContain('📚 122k 61% of 200k')
 })
 
 test('a reading of the conversation /clear left leaves the estimate', async ($, on) => {
@@ -101,7 +101,7 @@ test('a reading of the conversation /clear left leaves the estimate', async ($, 
   await run($, 'clear')
   await measured($)
 
-  expect(await footer($)).toContain('📚 21k (11%)')
+  expect(await footer($)).toContain('📚 21k 11% of 200k')
 })
 
 const withWindows = ($: TestEngine) =>

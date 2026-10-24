@@ -1,12 +1,13 @@
 import { expect, test } from 'claude-code/testing'
 
-import { bar, contextTone, countdown, plain, resetTone, segments, sevenDay, tokens, windowTone } from './format'
+import { bar, contextHint, contextTone, countdown, plain, resetTone, segments, sevenDay, tokens, windowTone } from './format'
 
 const at = (h: number, m: number) => new Date(2026, 9, 19, h, m)
 
 const EMPTY = {
   contextTokens: null,
   contextPercent: null,
+  contextWindow: null,
   fiveHourPercent: null,
   fiveHourResetsAt: null,
   sevenDayPercent: null,
@@ -46,16 +47,31 @@ test('time left is red at 30 minutes or less', () => {
   expect(resetTone(30 * 60_000)).toBe('error')
 })
 
-test('size leads, percentage follows in parentheses', () => {
+test('the size shows alone, its share of the window is its hint', () => {
   const parts = segments(
-    { ...EMPTY, contextTokens: 61_000, contextPercent: 31, fiveHourPercent: 42, fiveHourResetsAt: at(15, 10).toISOString() },
+    {
+      ...EMPTY,
+      contextTokens: 61_000,
+      contextPercent: 31,
+      contextWindow: 200_000,
+      fiveHourPercent: 42,
+      fiveHourResetsAt: at(15, 10).toISOString(),
+    },
     at(13, 48).getTime(),
   )
 
-  expect(plain(parts)).toBe('📚 61k (31%) ┊ ████▎░░░░░ 42% 🔔 15:10 (1h 22m)')
-  expect(parts.find(p => p.text === '61k')).toEqual({ text: '61k', tone: 'success', isBold: true })
-  expect(parts.find(p => p.text === ' (31%)')?.isDim).toBe(true)
+  expect(plain(parts)).toBe('📚 61k ┊ ████▎░░░░░ 42% 🔔 15:10 (1h 22m)')
+  expect(parts.find(p => p.text === '61k')).toEqual({ text: '61k', tone: 'success', isBold: true, hint: '31% of 200k' })
 })
+
+test('the hint needs the percentage and the window', () => {
+  const base = { ...EMPTY, contextTokens: 61_000, contextPercent: 31, contextWindow: 1_000_000 }
+
+  expect(contextHint(base)).toBe('31% of 1M')
+  expect(contextHint({ ...base, contextPercent: null })).toBeNull()
+  expect(contextHint({ ...base, contextWindow: null })).toBeNull()
+})
+
 
 test('no reading yet', () => {
   expect(plain(segments(EMPTY, 0))).toBe('📚 –')

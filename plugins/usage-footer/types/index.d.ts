@@ -1,6 +1,7 @@
 export type Snapshot = {
   contextTokens: number | null
   contextPercent: number | null
+  contextWindow: number | null
   fiveHourPercent: number | null
   fiveHourResetsAt: string | null
   sevenDayPercent: number | null

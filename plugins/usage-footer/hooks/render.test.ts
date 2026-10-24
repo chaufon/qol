@@ -1,5 +1,8 @@
-import type { SessionMessage } from 'claude-code'
+import type { RenderElement, SessionMessage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+
+// The children of the footer's root Box.
+const row = (el: RenderElement) => ('children' in el ? (el.children ?? []) : [])
 
 test('the footer draws size, window and reset with their colors', async ($, on) => {
   const now = new Date(2026, 9, 19, 14, 50).getTime()
@@ -17,7 +20,8 @@ test('the footer draws size, window and reset with their colors', async ($, on) 
     const span = async (text: string) => (await ui.findAll({ type: 'Text', text })).at(-1)?.props
 
     expect(await span('120k')).toMatchObject({ color: 'warning', bold: true })
-    expect(await span(' (60%)')).toMatchObject({ dimColor: true })
+    expect(await ui.find({ type: 'Box', key: 'context' })).toMatchObject({ text: '120k 60% of 200k ' })
+    expect(await ui.find({ type: 'Text', text: ' (60%)' })).toBeUndefined()
     expect(await span('█████████▌')).toMatchObject({ color: 'error' })
     expect(await span(' 95%')).toMatchObject({ color: 'error' })
     expect(await span('(20m)')).toMatchObject({ color: 'error' })
@@ -39,7 +43,7 @@ test('the footer shows the size a compaction reports until the next response', a
   const span = async (text: string) => (await ui.findAll({ type: 'Text', text })).at(-1)?.props
 
   expect(await span('18k')).toMatchObject({ color: 'success', bold: true })
-  expect(await span(' (9%)')).toMatchObject({ dimColor: true })
+  expect((await ui.find({ type: 'Text', text: ' 9% of 200k ' }))?.props).toMatchObject({ inverse: true })
 
   await $.session.measure({ context: { window: 200_000 }, rateLimits: [], changed: ['rateLimits'] })
   expect(await span('18k')).toMatchObject({ color: 'success' })
@@ -60,12 +64,36 @@ test('a reading of the conversation before the compaction leaves the compacted s
   await reading(122_000)
 
   const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
-  const footer = async () => (await ui.findAll({ type: 'Text' }))[0]?.text ?? ''
+  const footer = async () => (await ui.find({ type: 'Box' }))?.text ?? ''
 
-  expect(await footer()).toContain('📚 18k (9%)')
+  expect(await footer()).toContain('📚 18k')
 
   await reading(25_000)
-  expect(await footer()).toContain('📚 25k (13%)')
+  expect(await footer()).toContain('📚 25k')
+  await ui.unmount()
+})
+
+test('a pointer over the size reveals its share of the window on the row above', async ($, on) => {
+  mock.clock(on, { now: new Date(2026, 9, 19, 14, 50).getTime() })
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+
+  await $.session.measure({
+    context: { tokens: 62_000, window: 200_000, percent: 31 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: new Date(2026, 9, 19, 16, 0).toISOString() }],
+    changed: ['context', 'rateLimits'],
+  })
+
+  const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: ['focus'] } })
+  const context = row(await ui.drawn())[1]
+  const card = context === undefined || typeof context === 'string' ? undefined : row(context).at(-1)
+
+  expect(context).toMatchObject({ type: 'Box', props: { key: 'context' } })
+  expect(card).toMatchObject({
+    type: 'Box',
+    props: { position: 'absolute', top: -1, left: 0, display: 'none' },
+    hover: { display: 'flex' },
+  })
+  expect((await ui.find({ type: 'Text', text: ' 31% of 200k ' }))?.props).toMatchObject({ inverse: true })
   await ui.unmount()
 })
 

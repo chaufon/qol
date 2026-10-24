@@ -23,7 +23,8 @@ export const bar = (percent: number, cells = BAR_CELLS): { filled: string; empty
 
 export type Tone = 'success' | 'warning' | 'error'
 
-export type Segment = { text: string; tone?: Tone; isBold?: boolean; isDim?: boolean }
+// `hint` is the text a pointer over the segment reveals.
+export type Segment = { text: string; tone?: Tone; isBold?: boolean; isDim?: boolean; hint?: string }
 
 export const tokens = (n: number): string =>
   n >= 1_000_000
@@ -51,17 +52,20 @@ export const windowTone = (percent: number): Tone => (percent < 70 ? 'success' :
 
 export const resetTone = (ms: number): Tone => (ms <= 30 * 60_000 ? 'error' : 'success')
 
+// The share of the model's window, as `31% of 200k`.
+export const contextHint = (s: Snapshot): string | null =>
+  s.contextPercent === null || s.contextWindow === null ? null : `${s.contextPercent}% of ${tokens(s.contextWindow)}`
+
 export const segments = (s: Snapshot, now: number): Segment[] => {
   const out: Segment[] = [{ text: `${ICONS.context} `, isDim: true }]
 
   if (s.contextTokens === null) {
     out.push({ text: '–', isDim: true })
   } else {
-    out.push({ text: tokens(s.contextTokens), tone: contextTone(s.contextTokens), isBold: true })
+    const size: Segment = { text: tokens(s.contextTokens), tone: contextTone(s.contextTokens), isBold: true }
+    const hint = contextHint(s)
 
-    if (s.contextPercent !== null) {
-      out.push({ text: ` (${s.contextPercent}%)`, isDim: true })
-    }
+    out.push(hint === null ? size : { ...size, hint })
   }
 
   if (s.fiveHourPercent === null) {

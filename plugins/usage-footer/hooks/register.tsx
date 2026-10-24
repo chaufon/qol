@@ -3,6 +3,7 @@ import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit }
 
 import type { Snapshot } from '../types'
 import { segments, sevenDay } from './format'
+import type { Segment } from './format'
 
 const snapshot = atom({ plugin: 'usage-footer', key: 'snapshot' } as const, null)
 const now = atom({ plugin: 'usage-footer', key: 'now' } as const, 0)
@@ -14,6 +15,7 @@ const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]
   return {
     contextTokens: context.tokens ?? null,
     contextPercent: context.percent ?? null,
+    contextWindow: context.window,
     fiveHourPercent: fiveHour?.percentUsed ?? null,
     fiveHourResetsAt: fiveHour?.resetsAt ?? null,
     sevenDayPercent: week?.percentUsed ?? null,
@@ -55,6 +57,7 @@ const recount = async ($: EngineInterface, kind: Recount) => {
       ...base,
       contextTokens: tokens,
       contextPercent: tokens === null ? null : Math.round((tokens / context.window) * 100),
+      contextWindow: context.window,
     }
   })
 }
@@ -146,6 +149,7 @@ export const register: Register = on => {
       ...(s ?? toSnapshot(context, [])),
       contextTokens: tokens,
       contextPercent: tokens === null ? null : Math.round((tokens / context.window) * 100),
+      contextWindow: context.window,
     }))
 
     return result
@@ -158,9 +162,11 @@ export const register: Register = on => {
       return next(e)
     }
 
-    // A snapshot stored before the mod read the 7-day window has no fields for it.
+    // A snapshot stored by an earlier version of the mod lacks the fields it
+    // added since.
     const s: Snapshot = {
       ...stored,
+      contextWindow: stored.contextWindow ?? null,
       sevenDayPercent: stored.sevenDayPercent ?? null,
       sevenDayResetsAt: stored.sevenDayResetsAt ?? null,
     }
@@ -168,21 +174,40 @@ export const register: Register = on => {
     const week = sevenDay(s, t)
     const { Box, Text } = $.ui.resolve(e)
     const modes = e.props.modes.length > 0 ? `${e.props.modes.join(' & ')} ┊ ` : ''
-    const draw = (parts: ReturnType<typeof segments>) =>
-      parts.map(p => (
+    const parts = segments(s, t)
+    const at = parts.findIndex(p => p.hint !== undefined)
+    const size = parts[at]
+    const before = at === -1 ? parts : parts.slice(0, at)
+    const after = at === -1 ? [] : parts.slice(at + 1)
+    const draw = (list: Segment[]) =>
+      list.map(p => (
         <Text color={p.tone} bold={p.isBold} dimColor={p.isDim}>
           {p.text}
         </Text>
       ))
 
-    // Hovering the 7-day reading reveals its reset time on the row above,
-    // painted over what is there without moving it.
+    // Hovering the size reveals its share of the window, and hovering the
+    // 7-day reading its reset time, on the row above, painted over what is
+    // there without moving it.
     return (
       <Box flexDirection="row" flexWrap="wrap">
         <Text>
           <Text dimColor>{modes}</Text>
-          {draw(segments(s, t))}
+          {draw(before)}
         </Text>
+        {size !== undefined && (
+          <Box key="context">
+            <Text color={size.tone} bold={size.isBold} hover={{ underline: true }}>
+              {size.text}
+            </Text>
+            {size.hint !== undefined && (
+              <Box position="absolute" top={-1} left={0} display="none" hover={{ display: 'flex' }}>
+                <Text inverse>{` ${size.hint} `}</Text>
+              </Box>
+            )}
+          </Box>
+        )}
+        {after.length > 0 && <Text>{draw(after)}</Text>}
         {week !== null && (
           <Box key="seven-day">
             <Text>{draw(week.parts)}</Text>

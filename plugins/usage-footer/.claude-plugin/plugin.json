@@ -1,6 +1,6 @@
 {
   "name": "usage-footer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shows context usage, the 5-hour and 7-day rate-limit windows and their reset times at the right of the prompt footer",
   "license": "MIT",
   "author": { "name": "Chaufon", "url": "https://github.com/chaufon" },
