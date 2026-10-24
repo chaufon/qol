@@ -15,6 +15,11 @@
       "name": "grammar-tracker",
       "source": "./plugins/grammar-tracker",
       "description": "Checks the English grammar of each prompt, counts repeated mistakes, and shows the check in a band and a pane"
+    },
+    {
+      "name": "file-links",
+      "source": "./plugins/file-links",
+      "description": "Makes the file references in Claude's replies clickable and opens the file at that line in a side pane"
     }
   ]
 }
