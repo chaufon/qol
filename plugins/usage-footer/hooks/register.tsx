@@ -2,20 +2,39 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
 
 import type { Snapshot } from '../types'
-import { segments } from './format'
+import { segments, sevenDay } from './format'
 
 const snapshot = atom({ plugin: 'usage-footer', key: 'snapshot' } as const, null)
 const now = atom({ plugin: 'usage-footer', key: 'now' } as const, 0)
 
 const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]): Snapshot => {
   const fiveHour = rateLimits.find(r => r.kind === 'five_hour')
+  const week = rateLimits.find(r => r.kind === 'seven_day')
 
   return {
     contextTokens: context.tokens ?? null,
     contextPercent: context.percent ?? null,
     fiveHourPercent: fiveHour?.percentUsed ?? null,
     fiveHourResetsAt: fiveHour?.resetsAt ?? null,
+    sevenDayPercent: week?.percentUsed ?? null,
+    sevenDayResetsAt: week?.resetsAt ?? null,
   }
+}
+
+// A reading without a window, as after /clear, keeps the last one until that
+// window resets: the windows belong to the account.
+const keepWindows = (read: Snapshot, s: Snapshot | null, t: number): Snapshot => {
+  const isLive = (resetsAt: string | null | undefined) => resetsAt != null && new Date(resetsAt).getTime() > t
+  const fiveHour =
+    read.fiveHourPercent === null && isLive(s?.fiveHourResetsAt)
+      ? { fiveHourPercent: s?.fiveHourPercent ?? null, fiveHourResetsAt: s?.fiveHourResetsAt ?? null }
+      : {}
+  const week =
+    read.sevenDayPercent === null && isLive(s?.sevenDayResetsAt)
+      ? { sevenDayPercent: s?.sevenDayPercent ?? null, sevenDayResetsAt: s?.sevenDayResetsAt ?? null }
+      : {}
+
+  return { ...read, ...fiveHour, ...week }
 }
 
 // Commands that change the context without a response: `estimate` counts the
@@ -79,12 +98,7 @@ export const register: Register = on => {
     const t = await $.clock.now()
 
     await update($, snapshot, s => {
-      const read = toSnapshot(e.context, e.rateLimits)
-      // A reading with no 5-hour window, as after /clear, keeps the last one
-      // until that window resets: the window belongs to the account.
-      const isKept =
-        read.fiveHourPercent === null && s?.fiveHourResetsAt != null && new Date(s.fiveHourResetsAt).getTime() > t
-      const fresh = isKept ? { ...read, fiveHourPercent: s.fiveHourPercent, fiveHourResetsAt: s.fiveHourResetsAt } : read
+      const fresh = keepWindows(toSnapshot(e.context, e.rateLimits), s, t)
 
       // Until the first response on the new conversation, keep the size the
       // compaction or the recount reported.
@@ -138,24 +152,48 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const s = await read($, snapshot)
+    const stored = await read($, snapshot)
 
-    if (s === null) {
+    if (stored === null) {
       return next(e)
     }
 
-    const { Text } = $.ui.resolve(e)
+    // A snapshot stored before the mod read the 7-day window has no fields for it.
+    const s: Snapshot = {
+      ...stored,
+      sevenDayPercent: stored.sevenDayPercent ?? null,
+      sevenDayResetsAt: stored.sevenDayResetsAt ?? null,
+    }
+    const t = await read($, now)
+    const week = sevenDay(s, t)
+    const { Box, Text } = $.ui.resolve(e)
     const modes = e.props.modes.length > 0 ? `${e.props.modes.join(' & ')} ┊ ` : ''
+    const draw = (parts: ReturnType<typeof segments>) =>
+      parts.map(p => (
+        <Text color={p.tone} bold={p.isBold} dimColor={p.isDim}>
+          {p.text}
+        </Text>
+      ))
 
+    // Hovering the 7-day reading reveals its reset time on the row above,
+    // painted over what is there without moving it.
     return (
-      <Text>
-        <Text dimColor>{modes}</Text>
-        {segments(s, await read($, now)).map(p => (
-          <Text color={p.tone} bold={p.isBold} dimColor={p.isDim}>
-            {p.text}
-          </Text>
-        ))}
-      </Text>
+      <Box flexDirection="row" flexWrap="wrap">
+        <Text>
+          <Text dimColor>{modes}</Text>
+          {draw(segments(s, t))}
+        </Text>
+        {week !== null && (
+          <Box key="seven-day">
+            <Text>{draw(week.parts)}</Text>
+            {week.card !== null && (
+              <Box position="absolute" top={-1} right={0} display="none" hover={{ display: 'flex' }}>
+                <Text inverse>{` ${week.card} `}</Text>
+              </Box>
+            )}
+          </Box>
+        )}
+      </Box>
     )
   })
 }

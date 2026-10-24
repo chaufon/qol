@@ -30,7 +30,7 @@ const measured = ($: TestEngine) =>
 
 const footer = async ($: TestEngine) => {
   const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
-  const texts = (await ui.findAll({ type: 'Text' }))[0]?.text ?? ''
+  const texts = (await ui.findAll({ type: 'Box' }))[0]?.text ?? ''
   await ui.unmount()
 
   return texts
@@ -104,31 +104,41 @@ test('a reading of the conversation /clear left leaves the estimate', async ($, 
   expect(await footer($)).toContain('📚 21k (11%)')
 })
 
-const withFiveHour = ($: TestEngine) =>
+const withWindows = ($: TestEngine) =>
   $.session.measure({
     context: { tokens: 122_000, window: 200_000, percent: 61 },
-    rateLimits: [{ kind: 'five_hour', percentUsed: 14, resetsAt: '1970-01-01T05:00:00.000Z' }],
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 14, resetsAt: '1970-01-01T05:00:00.000Z' },
+      { kind: 'seven_day', percentUsed: 30, resetsAt: '1970-01-08T00:00:00.000Z' },
+    ],
     changed: ['context', 'rateLimits'],
   })
 
-test('a reading without rate limits after /clear keeps the 5-hour window', async ($, on) => {
+test('a reading without rate limits after /clear keeps both windows', async ($, on) => {
   mock.clock(on, { now: 0 })
   engine(on, { window: 200_000, estimate: 21_000 })
-  await withFiveHour($)
+  await withWindows($)
 
   await run($, 'clear')
   await $.session.measure({ context: { tokens: 21_000, window: 200_000, percent: 11 }, rateLimits: [], changed: ['context', 'rateLimits'] })
 
-  expect(await footer($)).toContain('14%')
+  expect(await footer($)).toContain(' 14%')
+  expect(await footer($)).toContain('🔋 30%')
 })
 
-test('a reading without rate limits drops a 5-hour window that has reset', async ($, on) => {
+test('a reading without rate limits drops a window that has reset', async ($, on) => {
   const clock = mock.clock(on, { now: 0 })
   engine(on, { window: 200_000, estimate: 21_000 })
-  await withFiveHour($)
+  await withWindows($)
 
   await clock.advance(5 * 60 * 60_000)
   await $.session.measure({ context: { tokens: 21_000, window: 200_000, percent: 11 }, rateLimits: [], changed: ['context', 'rateLimits'] })
 
-  expect(await footer($)).not.toContain('14%')
+  expect(await footer($)).not.toContain(' 14%')
+  expect(await footer($)).toContain('🔋 30%')
+
+  await clock.advance(7 * 24 * 60 * 60_000)
+  await $.session.measure({ context: { tokens: 21_000, window: 200_000, percent: 11 }, rateLimits: [], changed: ['context', 'rateLimits'] })
+
+  expect(await footer($)).not.toContain('🔋')
 })

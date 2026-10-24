@@ -68,3 +68,33 @@ test('a reading of the conversation before the compaction leaves the compacted s
   expect(await footer()).toContain('📚 25k (13%)')
   await ui.unmount()
 })
+
+test('the 7-day window reveals its reset time on hover', async ($, on) => {
+  const now = new Date(2026, 9, 19, 10, 0).getTime()
+  mock.clock(on, { now })
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+
+  await $.session.measure({
+    context: { tokens: 20_000, window: 200_000, percent: 10 },
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 14, resetsAt: new Date(now + 60 * 60_000).toISOString() },
+      { kind: 'seven_day', percentUsed: 42, resetsAt: new Date(2026, 9, 22, 14, 30).toISOString() },
+    ],
+    changed: ['context', 'rateLimits'],
+  })
+
+  const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  const span = async (text: string) => (await ui.findAll({ type: 'Text', text })).at(-1)?.props
+  const week = (await ui.findAll({ type: 'Box' })).find(b => b.key === 'seven-day')
+
+  expect(await span('42%')).toMatchObject({ color: 'success', bold: true })
+  expect(week?.children).toContainEqual(
+    expect.objectContaining({
+      type: 'Box',
+      props: expect.objectContaining({ position: 'absolute', display: 'none' }),
+      hover: { display: 'flex' },
+    }),
+  )
+  expect(await span(' Resets Thu 14:30 (3d 4h) ')).toMatchObject({ inverse: true })
+  await ui.unmount()
+})

@@ -3,6 +3,8 @@ export type Snapshot = {
   contextPercent: number | null
   fiveHourPercent: number | null
   fiveHourResetsAt: string | null
+  sevenDayPercent: number | null
+  sevenDayResetsAt: string | null
 }
 
 declare module 'claude-code' {

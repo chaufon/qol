@@ -1,8 +1,17 @@
 import { expect, test } from 'claude-code/testing'
 
-import { bar, contextTone, countdown, fiveHourTone, plain, resetTone, segments, tokens } from './format'
+import { bar, contextTone, countdown, plain, resetTone, segments, sevenDay, tokens, windowTone } from './format'
 
 const at = (h: number, m: number) => new Date(2026, 9, 19, h, m)
+
+const EMPTY = {
+  contextTokens: null,
+  contextPercent: null,
+  fiveHourPercent: null,
+  fiveHourResetsAt: null,
+  sevenDayPercent: null,
+  sevenDayResetsAt: null,
+}
 
 test('tokens are shortened', () => {
   expect(tokens(612)).toBe('612')
@@ -10,7 +19,9 @@ test('tokens are shortened', () => {
   expect(tokens(1_000_000)).toBe('1M')
 })
 
-test('countdown shows hours and minutes', () => {
+test('countdown shows days and hours, or hours and minutes', () => {
+  expect(countdown((3 * 24 + 4) * 60 * 60_000)).toBe('3d 4h')
+  expect(countdown(24 * 60 * 60_000)).toBe('1d 0h')
   expect(countdown(82 * 60_000)).toBe('1h 22m')
   expect(countdown(5 * 60_000)).toBe('5m')
   expect(countdown(-1)).toBe('0m')
@@ -23,11 +34,11 @@ test('context size is green below 100k, yellow to 150k, red above', () => {
   expect(contextTone(150_001)).toBe('error')
 })
 
-test('5-hour window is green below 70%, yellow to 90%, red above', () => {
-  expect(fiveHourTone(69.9)).toBe('success')
-  expect(fiveHourTone(70)).toBe('warning')
-  expect(fiveHourTone(90)).toBe('warning')
-  expect(fiveHourTone(90.1)).toBe('error')
+test('a rate-limit window is green below 70%, yellow to 90%, red above', () => {
+  expect(windowTone(69.9)).toBe('success')
+  expect(windowTone(70)).toBe('warning')
+  expect(windowTone(90)).toBe('warning')
+  expect(windowTone(90.1)).toBe('error')
 })
 
 test('time left is red at 30 minutes or less', () => {
@@ -37,7 +48,7 @@ test('time left is red at 30 minutes or less', () => {
 
 test('size leads, percentage follows in parentheses', () => {
   const parts = segments(
-    { contextTokens: 61_000, contextPercent: 31, fiveHourPercent: 42, fiveHourResetsAt: at(15, 10).toISOString() },
+    { ...EMPTY, contextTokens: 61_000, contextPercent: 31, fiveHourPercent: 42, fiveHourResetsAt: at(15, 10).toISOString() },
     at(13, 48).getTime(),
   )
 
@@ -47,7 +58,28 @@ test('size leads, percentage follows in parentheses', () => {
 })
 
 test('no reading yet', () => {
-  expect(plain(segments({ contextTokens: null, contextPercent: null, fiveHourPercent: null, fiveHourResetsAt: null }, 0))).toBe('📚 –')
+  expect(plain(segments(EMPTY, 0))).toBe('📚 –')
+  expect(sevenDay(EMPTY, 0)).toBeNull()
+})
+
+test('the 7-day window follows a separator as a battery and its percentage', () => {
+  const resetsAt = new Date(2026, 9, 22, 14, 30).toISOString()
+  const week = sevenDay({ ...EMPTY, sevenDayPercent: 91.6, sevenDayResetsAt: resetsAt }, at(10, 0).getTime())
+
+  expect(plain(week?.parts ?? [])).toBe(' ┊ 🔋 92%')
+  expect(week?.parts.find(p => p.text === '92%')).toEqual({ text: '92%', tone: 'error', isBold: true })
+  expect(week?.card).toBe('Resets Thu 14:30 (3d 4h)')
+})
+
+test('a 7-day window without a reset time has no card', () => {
+  expect(sevenDay({ ...EMPTY, sevenDayPercent: 12 }, 0)).toEqual({
+    parts: [
+      { text: ' ┊ ', isDim: true },
+      { text: '🔋 ', isDim: true },
+      { text: '12%', tone: 'success', isBold: true },
+    ],
+    card: null,
+  })
 })
 
 test('the bar fills in eighths of a cell and keeps its width', () => {

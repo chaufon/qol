@@ -9,7 +9,7 @@
     {
       "name": "usage-footer",
       "source": "./plugins/usage-footer",
-      "description": "Shows context usage, the 5-hour rate-limit window and its reset time at the right of the prompt footer"
+      "description": "Shows context usage, the 5-hour and 7-day rate-limit windows and their reset times at the right of the prompt footer"
     },
     {
       "name": "grammar-tracker",
