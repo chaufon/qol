@@ -40,14 +40,14 @@ const keepWindows = (read: Snapshot, s: Snapshot | null, t: number): Snapshot =>
 }
 
 // Commands that change the context without a response: `estimate` counts the
-// conversation locally, `rescale` keeps the size and measures it against the
-// model's window.
+// conversation as /context does, `rescale` keeps the size and measures it
+// against the model's window.
 const RECOUNTS: Record<string, Recount> = { clear: 'estimate', rewind: 'estimate', resume: 'estimate', model: 'rescale' }
 
 type Recount = 'estimate' | 'rescale'
 
 const recount = async ($: EngineInterface, kind: Recount) => {
-  const { context } = await $.session.usage(kind === 'estimate' ? { breakdown: 'summary' } : undefined)
+  const { context } = await $.session.usage(kind === 'estimate' ? { breakdown: 'full' } : undefined)
 
   await update($, snapshot, s => {
     const base = s ?? toSnapshot(context, [])
@@ -63,18 +63,15 @@ const recount = async ($: EngineInterface, kind: Recount) => {
 }
 
 export const register: Register = on => {
-  // The recount a command asked for, repeated on each tick until a response
-  // reports the size: a command that opens a picker changes the context later.
-  let pending: Recount | null = null
   // The engine's latest reading, and a reading of a conversation that a
   // compaction or a command replaced: the engine repeats it until a response.
   let lastReading: number | undefined
   let stale: number | undefined
 
   // A session has no reading until its first response, so the footer shows
-  // the local count of the conversation it starts with.
+  // the count of the conversation it starts with, as /context counts it.
   on('session.start', async ($, e, next) => {
-    const usage = await $.session.usage({ breakdown: 'summary' })
+    const usage = await $.session.usage({ breakdown: 'full' })
     lastReading = usage.context.tokens
     await update($, snapshot, () => {
       const read = toSnapshot(usage.context, usage.rateLimits)
@@ -84,13 +81,7 @@ export const register: Register = on => {
       return { ...read, contextTokens: tokens, contextPercent: read.contextPercent ?? percent }
     })
     await $.clock.now().then(t => update($, now, () => t))
-    $.clock.every(30_000, () => {
-      void $.clock.now().then(t => update($, now, () => t))
-
-      if (pending !== null) {
-        void recount($, pending)
-      }
-    })
+    $.clock.every(30_000, () => void $.clock.now().then(t => update($, now, () => t)))
 
     return next(e)
   })
@@ -110,7 +101,6 @@ export const register: Register = on => {
     await update($, now, () => t)
 
     if (!isStale) {
-      pending = null
       stale = undefined
     }
 
@@ -124,10 +114,8 @@ export const register: Register = on => {
     const kind = RECOUNTS[e.command]
 
     if (kind !== undefined) {
-      pending = kind
       stale = kind === 'estimate' ? lastReading : stale
       await recount($, kind)
-      $.clock.after(3_000, () => void recount($, kind))
     }
 
     return result
@@ -197,7 +185,7 @@ export const register: Register = on => {
         </Text>
         {size !== undefined && (
           <Box key="context">
-            <Text color={size.tone} bold={size.isBold} hover={{ underline: true }}>
+            <Text color={size.tone} bold={size.isBold}>
               {size.text}
             </Text>
             {size.hint !== undefined && (

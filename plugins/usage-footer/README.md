@@ -15,7 +15,7 @@ Shows four readings at the right of the prompt footer, after the mode labels:
 
 Hovering a reading shows more on the row above: `📚 103k` shows its share of the model's window, as `10% of 1M`, and `🔋 42%` shows when the 7-day window resets, and the time left, as `Resets Thu 14:30 (3d 4h)`. Hover needs a terminal that reports mouse movement to Claude Code, as the fullscreen layout does.
 
-The readings update after each response, after `/compact` and automatic compaction, and after `/clear`, `/rewind`, `/resume` and `/model`. Until a conversation has its first response, the size is a local estimate. The time left updates every 30 seconds.
+The readings update after each response, after `/compact` and automatic compaction, and after `/clear`, `/rewind`, `/resume` and `/model`. Until a conversation has its first response, the size is the count `/context` shows. The time left updates every 30 seconds.
 
 When the terminal is too narrow for one line, the footer wraps the readings onto a second line.
 

@@ -2,27 +2,31 @@ import type { SessionContextBreakdown } from 'claude-code'
 import type { TestBody } from 'claude-code/testing'
 import { expect, mock, test } from 'claude-code/testing'
 
-type Usage = { window: number; estimate: number }
+type Usage = { window: number; estimate: number; counts?: number }
 type TestEngine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
 
 // Stands in for the engine: a session starts in its folder, commands print
-// nothing, and the usage call reads the window and the local estimate the test
-// sets.
+// nothing, and the usage call reads the window and, counted as /context counts
+// it, the size the test sets; each count of that kind adds to `usage.counts`.
 const engine = (on: On, usage: Usage) => {
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('command.run', () => ({ text: '' }))
-  on('session.usage', ($, e) => ({
-    value: {
-      startedAt: 0,
-      context: {
-        window: usage.window,
-        breakdown: e.breakdown === undefined ? undefined : ({ totalTokens: usage.estimate } as SessionContextBreakdown),
+  on('session.usage', ($, e) => {
+    if (e.breakdown === 'full') usage.counts = (usage.counts ?? 0) + 1
+
+    return {
+      value: {
+        startedAt: 0,
+        context: {
+          window: usage.window,
+          breakdown: e.breakdown !== 'full' ? undefined : ({ totalTokens: usage.estimate } as SessionContextBreakdown),
+        },
+        rateLimits: [],
       },
-      rateLimits: [],
-    },
-  }))
+    }
+  })
 }
 
 const measured = ($: TestEngine) =>
@@ -70,17 +74,16 @@ test('/model keeps the size and measures it against the new window', async ($, o
   expect(await footer($)).toContain('📚 122k 12% of 1M')
 })
 
-test('a choice made in the picker shows on the recount 3 seconds later', async ($, on) => {
+test('a command counts the conversation once, and no tick counts it again', async ($, on) => {
   const clock = mock.clock(on, { now: 0 })
-  const usage = { window: 200_000, estimate: 122_000 }
+  const usage: Usage = { window: 200_000, estimate: 21_000 }
   engine(on, usage)
   await measured($)
 
-  await run($, 'resume')
-  usage.estimate = 48_000
-  await clock.advance(3_000)
+  await run($, 'clear')
+  await clock.advance(120_000)
 
-  expect(await footer($)).toContain('📚 48k 24% of 200k')
+  expect(usage.counts).toBe(1)
 })
 
 test('other commands leave the size alone', async ($, on) => {

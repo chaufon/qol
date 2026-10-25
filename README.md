@@ -43,6 +43,13 @@ claude plugin update file-links@qol
 
 Then run `/reload-plugins` in an open session, or start a new session.
 
+A mod added to the marketplace after your first install is not installed by the update. Install it by name once the marketplace is updated:
+
+```
+claude plugin marketplace update qol
+claude plugin install file-links@qol
+```
+
 To receive new versions without commands, turn on auto-update once: run `/plugin`, open the **Marketplaces** tab, select `qol` and choose **Enable auto-update**. New versions load in the next session or after `/reload-plugins`.
 
 ## Uninstall

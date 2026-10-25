@@ -85,7 +85,8 @@ test('a pointer over the size reveals its share of the window on the row above',
 
   const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: ['focus'] } })
   const context = row(await ui.drawn())[1]
-  const card = context === undefined || typeof context === 'string' ? undefined : row(context).at(-1)
+  const parts = context === undefined || typeof context === 'string' ? [] : row(context)
+  const card = parts.at(-1)
 
   expect(context).toMatchObject({ type: 'Box', props: { key: 'context' } })
   expect(card).toMatchObject({
@@ -94,6 +95,7 @@ test('a pointer over the size reveals its share of the window on the row above',
     hover: { display: 'flex' },
   })
   expect((await ui.find({ type: 'Text', text: ' 31% of 200k ' }))?.props).toMatchObject({ inverse: true })
+  expect(parts[0]).not.toHaveProperty('hover')
   await ui.unmount()
 })
 
