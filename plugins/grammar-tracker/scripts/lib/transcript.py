@@ -5,7 +5,7 @@ from pathlib import Path
 
 from lib.config import CLAUDE_DIR
 
-# The first paragraph of a reply starts with one of these (see instruction.py).
+# A reply starts with the label and its grammar-json block, or with the does-not-apply phrase (see instruction.py).
 CHECK_LABEL = "**English grammar check:**"
 NOT_APPLY = "English grammar check does not apply"
 BLOCK_RE = re.compile(r"```grammar-json\s*\n(.*?)\n\s*```", re.DOTALL)
@@ -28,6 +28,7 @@ class Mistake:
     identifier: str
     original: str
     corrected: str
+    reason: str | None = None
 
 
 @dataclass
@@ -35,7 +36,6 @@ class Check:
     input_mode: str | None
     corrected_prompt: str
     mistakes: list[Mistake]
-    summary: str = ""
 
 
 def _prompt_text(entry):
@@ -80,8 +80,7 @@ def does_not_apply(reply):
 
 
 def extract_check(reply):
-    """Parse the grammar-json block of a reply and the check text between its label and the block.
-    Return None when the reply has no block."""
+    """Parse the grammar-json block of a reply. Return None when the reply has no block."""
     match = BLOCK_RE.search(reply)
     if not match:
         return None
@@ -93,15 +92,12 @@ def extract_check(reply):
                 identifier=m["identifier"].strip().lower(),
                 original=m["original"],
                 corrected=m["corrected"],
+                reason=(m.get("reason") or "").strip() or None,
             )
             for m in data["mistakes"]
         ]
         mode = data.get("input_mode")
-        # Text the reply writes before the label, such as progress notes, is not part of the check.
-        before = reply[:match.start()]
-        label = before.rfind(CHECK_LABEL)
-        summary = (before if label == -1 else before[label + len(CHECK_LABEL):]).strip()
         return Check(input_mode=mode if mode in INPUT_MODES else None,
-                     corrected_prompt=data["corrected_prompt"], mistakes=mistakes, summary=summary)
+                     corrected_prompt=data["corrected_prompt"], mistakes=mistakes)
     except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
         raise ValueError(f"malformed grammar-json block: {error!r}") from error

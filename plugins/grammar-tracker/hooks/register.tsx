@@ -32,6 +32,7 @@ type OccurrenceFields = {
   identifier: string
   original: string
   corrected: string
+  reason: string | null
   count: number
   is_recurring: boolean
 }
@@ -39,12 +40,11 @@ type OccurrenceFields = {
 type StopHookOutput = {
   systemMessage?: string
   does_not_apply?: true
-  summary?: string
   corrected_prompt?: string
   occurrences?: OccurrenceFields[]
 }
 
-// Removes the grammar check paragraph and its grammar-json block from the start of a reply's first block.
+// Removes the grammar check label and its grammar-json block from the start of a reply's first block.
 // A grammar-json block that is still streaming hides the whole text until it closes.
 export function stripCheck(text: string): string {
   const start = text.trimStart()
@@ -64,9 +64,9 @@ export function stripCheck(text: string): string {
 
 export function toCheck(output: StopHookOutput): GrammarCheck | null {
   if (output.does_not_apply) return { doesNotApply: true }
-  if (output.summary === undefined || output.occurrences === undefined) return null
+  if (output.occurrences === undefined) return null
   const occurrences = output.occurrences.map(toOccurrence)
-  return { doesNotApply: false, summary: output.summary, correctedPrompt: output.corrected_prompt ?? '', occurrences }
+  return { doesNotApply: false, correctedPrompt: output.corrected_prompt ?? '', occurrences }
 }
 
 function toOccurrence(o: OccurrenceFields): Occurrence {
@@ -78,6 +78,7 @@ function toOccurrence(o: OccurrenceFields): Occurrence {
     identifier: o.identifier,
     original: o.original,
     corrected: o.corrected,
+    reason: o.reason ?? null,
     count: o.count,
     isRecurring: o.is_recurring,
   }
@@ -212,7 +213,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Markdown, Text } = $.ui.resolve(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
     const width = e.props.bodyColumns
     const check = await read($, last)
     const current: PaneTab = await read($, tab)
@@ -237,12 +238,12 @@ export const register: Register = on => {
     const sentences = (o: Occurrence) => [
       <Text key="original" color="error">✗ {o.original}</Text>,
       <Text key="corrected" color="success">✓ {o.corrected}</Text>,
+      ...(o.reason ? [<Text key="reason">{o.reason}</Text>] : []),
     ]
     const example = (o: Occurrence) => (o.typeExample ? `Example: ${o.typeExample}` : '')
 
     const lastTab = (check: GrammarCheck & { doesNotApply: false }) => (
       <Box flexDirection="column">
-        <Markdown text={check.summary} />
         {check.occurrences.length === 0 ? <Text color="success">✓ No mistakes</Text> : null}
         {check.occurrences.map((o, n) => {
           const title = `${n + 1} · ${capitalize(o.typeLabel)} · "${o.identifier}" ×${o.count}${o.isRecurring ? ' ⟳' : ''}`

@@ -41,7 +41,7 @@ def test_top_on_newer_database_exits_with_the_reason_alone(tmp_path):
     result = subprocess.run([sys.executable, str(ROOT / "scripts" / "query.py"), "top"], capture_output=True, text=True,
                             env=script_env(tmp_path, CLAUDE_PLUGIN_DATA=str(tmp_path)), cwd=tmp_path)
     assert result.returncode == 1
-    assert result.stderr.strip() == ("grammar.db is at version 99, and this grammar tracker reads version 2 or older."
+    assert result.stderr.strip() == ("grammar.db is at version 99, and this grammar tracker reads version 3 or older."
                                      " Update the grammar-tracker mod.")
 
 

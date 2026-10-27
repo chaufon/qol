@@ -31,7 +31,7 @@ def assistant(uuid, text):
 
 
 def block(payload):
-    return "**English grammar check:** One mistake.\n\n```grammar-json\n" + json.dumps(payload) + "\n```\n\nRest of the reply."
+    return "**English grammar check:**\n```grammar-json\n" + json.dumps(payload) + "\n```\n\nRest of the reply."
 
 
 @pytest.fixture

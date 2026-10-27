@@ -1,9 +1,9 @@
 """Save the grammar-json block of the last reply to the database and print the check for the grammar-tracker mod.
 
 The mod (hooks/register.tsx) runs this at the end of each turn with the Stop hook input fields `session_id`, `cwd` and
-`last_assistant_message` (`transcript_path` is optional). It prints `summary` (the check text), `corrected_prompt` and
-`occurrences` (each saved mistake with its counter and its type's label, description and example), which the mod
-draws in its band and pane. When the reply says the check does not apply, it prints `does_not_apply` alone. Never blocks
+`last_assistant_message` (`transcript_path` is optional). It prints `corrected_prompt` and `occurrences` (each saved
+mistake with its reason, its counter and its type's label, description and example), which the mod draws in its band
+and pane. When the reply says the check does not apply, it prints `does_not_apply` alone. Never blocks
 Claude Code: failures go to the error log and print `systemMessage`, a one-line warning that the mod shows as a toast."""
 import json
 import sys
@@ -60,7 +60,7 @@ def report(hook_input):
         conn.close()
     if saved is None:
         return None
-    return {"summary": check.summary, "corrected_prompt": check.corrected_prompt,
+    return {"corrected_prompt": check.corrected_prompt,
             "occurrences": occurrence_fields(saved, config.RECURRING_THRESHOLD)}
 
 

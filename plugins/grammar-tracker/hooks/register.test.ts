@@ -6,14 +6,14 @@ import { bandLine, bar, cell, stripCheck, toCheck } from './register'
 
 
 const STOP_OUTPUT = {
-  summary: 'Two mistakes.',
   corrected_prompt: 'What files does the mod folder have?',
   occurrences: [
-    { type: 'article', type_label: 'article', identifier: 'the', original: 'a', corrected: 'b', count: 1,
+    { type: 'article', type_label: 'article', identifier: 'the', original: 'a', corrected: 'b',
+      reason: 'a known remote takes the', count: 1,
       is_recurring: false, type_description: 'A wrong, missing or extra "a/an" or "the".',
       type_example: '"the people are selfish" instead of "people are selfish"' },
     { type: 'malformed_tense', type_label: 'malformed tense', identifier: 'does have', original: 'c',
-      corrected: 'd', count: 3, is_recurring: true,
+      corrected: 'd', reason: null, count: 3, is_recurring: true,
       type_description: 'The right tense built wrong: auxiliaries missing, extra or in the wrong place.',
       type_example: null },
   ],
@@ -68,7 +68,7 @@ async function pressBand($: Engine) {
 }
 
 test('stripCheck removes the check and its grammar-json block', () => {
-  const text = '**English grammar check:** One.\n\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
+  const text = '**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
   expect(stripCheck(text)).toBe('The answer.')
 })
 
@@ -78,13 +78,13 @@ test('stripCheck removes the "does not apply" paragraph', () => {
 })
 
 test('stripCheck ignores whitespace before the check', () => {
-  const text = '\n **English grammar check:** One.\n\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
+  const text = '\n **English grammar check:**\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
   expect(stripCheck(text)).toBe('The answer.')
   expect(stripCheck('\nEnglish grammar check does not apply.\n\nThe answer.')).toBe('The answer.')
 })
 
 test('stripCheck hides a grammar-json block that is still streaming', () => {
-  expect(stripCheck('**English grammar check:** One.\n\n```grammar-json\n{"mistakes": [')).toBe('')
+  expect(stripCheck('**English grammar check:**\n```grammar-json\n{"mistakes": [')).toBe('')
 })
 
 test('stripCheck leaves other text unchanged', () => {
@@ -105,7 +105,7 @@ test('the reply drawn has no check in its first block only', async ($, on) => {
     if (e.component === 'AssistantMessage') seen.push(e.props.text)
     return $.ui.resolve(e).Text({ children: '' })
   })
-  const check = '**English grammar check:** One.\n\n```grammar-json\n{}\n```\n\nThe answer.'
+  const check = '**English grammar check:**\n```grammar-json\n{}\n```\n\nThe answer.'
   for (const isFirstOfReply of [true, false]) {
     await $.ui.render({ surface: 'terminal', component: 'AssistantMessage', requestId: 'm1',
                         props: { text: check, isFirstOfReply } })
@@ -213,7 +213,7 @@ test('a failed query.py shows its error in the pane and a toast', async ($, on) 
 const PANE = { plugin: 'grammar-tracker', surface: 'terminal', component: 'Pane', requestId: 'grammar',
                props: PANE_PROPS } as const
 
-test('the Last prompt tab draws a card per mistake with its title, sentences and rule', async ($, on) => {
+test('the Last prompt tab draws a card per mistake with its title, sentences, reason and rule', async ($, on) => {
   engine(on, JSON.stringify(STOP_OUTPUT))
   await $.turn.complete(TURN)
   const pane = await $.ui.mount(PANE)
@@ -221,6 +221,7 @@ test('the Last prompt tab draws a card per mistake with its title, sentences and
   expect(await pane.find({ text: ' 2 · Malformed tense · "does have" ×3 ⟳ ' })).toBeDefined()
   expect(await pane.find({ text: '✗ c' })).toBeDefined()
   expect(await pane.find({ text: '✓ d' })).toBeDefined()
+  expect(await pane.find({ text: 'a known remote takes the' })).toBeDefined()
   expect(await pane.find({ text: 'A wrong, missing or extra "a/an" or "the". ("the people are selfish" instead of "people are selfish")' })).toBeDefined()
   expect(await pane.find({ text: 'The right tense built wrong: auxiliaries missing, extra or in the wrong place.' })).toBeDefined()
   expect(await pane.find({ text: ' Corrected prompt ' })).toBeDefined()

@@ -27,7 +27,8 @@ SCHEMA = (
         prompt_id INTEGER NOT NULL REFERENCES prompts (id),
         mistake_id INTEGER NOT NULL REFERENCES mistakes (id),
         original_sentence TEXT NOT NULL,
-        corrected_sentence TEXT NOT NULL
+        corrected_sentence TEXT NOT NULL,
+        reason TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS occurrences_mistake ON occurrences (mistake_id)",
 )
@@ -96,7 +97,7 @@ SEED = (
     ("other", "other", "Any mistake that fits none of the types above.", None,
      "a short description of the mistake"),
 )
-VERSION = 2
+VERSION = 3
 # Types that version 2 adds, and the word_choice text of version 1 that version 2 rewrites.
 ADDED_IN_2 = ("false_friend", "countability", "missing_subject", "verb_pattern", "question_form")
 WORD_CHOICE_1 = ("A real English word that does not mean what you meant, false friends included.",
@@ -128,6 +129,7 @@ class SavedOccurrence:
     identifier: str
     original: str
     corrected: str
+    reason: str | None
     count: int
 
 
@@ -167,8 +169,9 @@ def _migrate(conn):
             return
         if version == 0:
             _create(conn)
-        else:
+        if version == 1:
             _add_types_of_2(conn)
+        _add_reason(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchall():
             raise sqlite3.IntegrityError("foreign key check failed after migration")
         conn.execute(f"PRAGMA user_version = {VERSION}")
@@ -214,6 +217,13 @@ def _add_types_of_2(conn):
                  " WHERE key = 'word_choice' AND description = ? AND example = ? AND identifier_rule = ?",
                  (*word_choice[2:], *WORD_CHOICE_1))
 
+def _add_reason(conn):
+    """Add the reason column of version 3 to occurrences. Occurrences saved before it have no reason."""
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(occurrences)")]
+    if "reason" not in columns:
+        conn.execute("ALTER TABLE occurrences ADD COLUMN reason TEXT")
+
+
 def _types(conn, where=""):
     rows = conn.execute(f"SELECT key, label, description, example, identifier_rule, position, deleted_at"
                         f" FROM mistake_types {where} ORDER BY position").fetchall()
@@ -251,13 +261,14 @@ def save_check(conn, *, prompt_uuid, session_id, created_at, project_dir, origin
             (mistake_id,) = conn.execute("SELECT id FROM mistakes WHERE type = ? AND identifier = ?",
                                          (type_, mistake.identifier)).fetchone()
             types.append(type_)
-            conn.execute("INSERT INTO occurrences (prompt_id, mistake_id, original_sentence, corrected_sentence)"
-                         " VALUES (?, ?, ?, ?)", (prompt_id, mistake_id, mistake.original, mistake.corrected))
+            conn.execute("INSERT INTO occurrences (prompt_id, mistake_id, original_sentence, corrected_sentence,"
+                         " reason) VALUES (?, ?, ?, ?, ?)",
+                         (prompt_id, mistake_id, mistake.original, mistake.corrected, mistake.reason))
             mistake_ids.append(mistake_id)
     return [
         SavedOccurrence(*conn.execute("SELECT key, label, description, example FROM mistake_types WHERE key = ?",
                                       (type_,)).fetchone(),
-                        m.identifier, m.original, m.corrected,
+                        m.identifier, m.original, m.corrected, m.reason,
                         conn.execute("SELECT COUNT(*) FROM occurrences WHERE mistake_id = ?", (mid,)).fetchone()[0])
         for m, type_, mid in zip(check.mistakes, types, mistake_ids)
     ]
@@ -267,7 +278,7 @@ def top_mistakes(conn, limit):
     """Return the most frequent mistakes across all prompts, each with its latest occurrence as the example."""
     rows = conn.execute(
         "SELECT t.key, t.label, t.description, t.example, m.identifier, latest.original_sentence,"
-        " latest.corrected_sentence, counts.n"
+        " latest.corrected_sentence, latest.reason, counts.n"
         " FROM (SELECT mistake_id, COUNT(*) AS n, MAX(id) AS latest_id FROM occurrences GROUP BY mistake_id) counts"
         " JOIN mistakes m ON m.id = counts.mistake_id"
         " JOIN mistake_types t ON t.key = m.type"

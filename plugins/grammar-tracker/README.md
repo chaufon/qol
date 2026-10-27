@@ -52,18 +52,19 @@ Start the prompt with `Claude, do not grammar check` (or `don't grammar check`, 
 ## How it works
 
 1. `scripts/prompt_hook.py` (the mod's `UserPromptSubmit` hook, in `hooks/hooks.json`) asks Claude to start each reply
-   with a grammar check of the prompt, labeled `**English grammar check:**` and followed by a `grammar-json` block:
-   input mode (typed or dictated), corrected prompt, and one entry per mistake with its type, identifier, original
-   sentence and corrected sentence. The instruction lists the active types from the `mistake_types` table.
+   with a grammar check of the prompt: the label `**English grammar check:**` and a `grammar-json` block, with no other
+   text about the check. The block holds the input mode (typed or dictated), the corrected prompt, and one entry per
+   mistake with its type, identifier, original sentence, corrected sentence and a short reason. The instruction lists
+   the active types from the `mistake_types` table.
 2. At the end of each turn, the mod's hooks module (`hooks/register.tsx`) runs `scripts/stop_hook.py` with the session
    id and Claude's last reply.
-3. `stop_hook.py` reads the `grammar-json` block, saves it to SQLite (`grammar.db`), and prints the check text, the
-   corrected prompt and each mistake with its counter.
+3. `stop_hook.py` reads the `grammar-json` block, saves it to SQLite (`grammar.db`), and prints the corrected prompt
+   and each mistake with its reason and counter.
 4. The mod keeps that check for the band and the pane, and hides the grammar check from the reply on screen. The stored
    reply keeps it (ctrl+o shows it).
 
 ```
-prompt ──> prompt_hook.py ──> Claude's reply: grammar check + grammar-json block + answer
+prompt ──> prompt_hook.py ──> Claude's reply: label + grammar-json block + answer
                                      │
               turn ends ──> mod ──> stop_hook.py ──> grammar.db
                                      │
@@ -102,14 +103,14 @@ The `mistake_types` table in the database holds the types of mistake. Its column
   default and stays open across replies.
 - Claude Code places the pane: a sidebar on the right in the fullscreen layout at 110 columns or more, otherwise a box
   above the prompt.
-- **Last prompt** tab: the check text, then one card per mistake. The card's border shows the number, type,
-  identifier and counter (`1 · Word choice · "looks like" ×3 ⟳`). Inside are the original sentence in red (`✗`), the
-  corrected sentence in green (`✓`) and the type's description and example, dimmed. Recurring mistakes have a yellow
+- **Last prompt** tab: one card per mistake. The card's border shows the number, type, identifier and counter
+  (`1 · Word choice · "looks like" ×3 ⟳`). Inside are the original sentence in red (`✗`), the corrected sentence in
+  green (`✓`), Claude's reason, and the type's description and example, dimmed. Recurring mistakes have a yellow
   border and `⟳`. The corrected prompt is in its own card at the end.
 - **Top mistakes** tab: a table of the 10 most frequent mistakes with rank, type, identifier and a bar with the
   counter. A click on a row opens a card under it, and a second click closes it; one row is open at a time. The card's
   border shows the type's description (cut with `…` when the border is too short, and then repeated in full inside).
-  Inside are the type's example and the most recent original and corrected sentences.
+  Inside are the type's example and the most recent original sentence, corrected sentence and reason.
 - Failures go to `errors.log` next to the database and never block Claude Code. A failure of the stop hook or of the
   pane's query also shows a toast; a failure of the prompt hook shows nothing.
 - When the data folder cannot be created or written (for example, a `CLAUDE_CONFIG_DIR` without write access), the

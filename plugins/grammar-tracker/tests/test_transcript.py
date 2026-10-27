@@ -10,7 +10,7 @@ PAYLOAD = {
     "corrected_prompt": "I need the Claude model to include it.",
     "mistakes": [
         {"type": "native_expression", "identifier": "  Need Somebody To ", "original": "we need that it includes",
-         "corrected": "we need it to include"},
+         "corrected": "we need it to include", "reason": " want + object + to-infinitive "},
     ],
 }
 
@@ -55,6 +55,13 @@ def test_extract_check_parses_and_normalizes():
     assert mistake.identifier == "need somebody to"
     assert mistake.original == "we need that it includes"
     assert mistake.corrected == "we need it to include"
+    assert mistake.reason == "want + object + to-infinitive"
+
+
+@pytest.mark.parametrize("reason", [{}, {"reason": None}, {"reason": "  "}])
+def test_extract_check_reads_missing_or_blank_reason_as_none(reason):
+    mistake = {k: v for k, v in PAYLOAD["mistakes"][0].items() if k != "reason"} | reason
+    assert extract_check(block({**PAYLOAD, "mistakes": [mistake]})).mistakes[0].reason is None
 
 
 def test_extract_check_keeps_unknown_type_and_maps_bad_mode_to_none():
@@ -70,18 +77,14 @@ def test_extract_check_accepts_mistake_free_prompt():
     assert check.mistakes == []
 
 
-def test_extract_check_reads_summary_after_label():
-    assert extract_check(block(PAYLOAD)).summary == "One mistake."
+def test_extract_check_reads_block_without_label():
+    reply = "```grammar-json\n" + json.dumps(PAYLOAD) + "\n```\n\nRest."
+    assert extract_check(reply).corrected_prompt == PAYLOAD["corrected_prompt"]
 
 
-def test_extract_check_reads_summary_without_label():
-    reply = "Two mistakes here.\n\n```grammar-json\n" + json.dumps(PAYLOAD) + "\n```\n\nRest."
-    assert extract_check(reply).summary == "Two mistakes here."
-
-
-def test_extract_check_reads_summary_from_label_after_progress_text():
+def test_extract_check_reads_block_after_progress_text():
     reply = "Now writing the hooks.\nFixing the test helper.\n" + block(PAYLOAD)
-    assert extract_check(reply).summary == "One mistake."
+    assert extract_check(reply).corrected_prompt == PAYLOAD["corrected_prompt"]
 
 
 def test_extract_check_is_none_without_block():

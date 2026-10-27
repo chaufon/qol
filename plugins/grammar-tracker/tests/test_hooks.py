@@ -21,6 +21,7 @@ def test_prompt_hook_adds_instruction(tmp_path):
     assert "grammar-json" in context
     assert "native_expression" in context
     assert "**English grammar check:**" in context
+    assert '"reason": "<why it is a mistake, in a few words>"' in context
     assert '- word_choice: the correct word ("key" for "press the G button")' in context
     assert "- false_friend: the false friend used, never the correct word" in context
     positions = [context.index(f"- {key}:") for key in ("spelling", "irregular_verb", "phrasal_verb", "wrong_tense",
@@ -64,7 +65,8 @@ def stop_payload(transcript):
 
 
 def test_stop_hook_saves_and_reports(tmp_path, write_transcript):
-    mistake = {"type": "article", "identifier": "no article", "original": "the people", "corrected": "people"}
+    mistake = {"type": "article", "identifier": "no article", "original": "the people", "corrected": "people",
+               "reason": "people in general take no article"}
     payload = {"input_mode": "typed", "corrected_prompt": "people", "mistakes": [mistake] * 3}
     transcript = write_transcript([user("u1", "the people"), assistant("a1", block(payload))])
     out = run("stop_hook.py", stop_payload(transcript), tmp_path)
@@ -72,10 +74,11 @@ def test_stop_hook_saves_and_reports(tmp_path, write_transcript):
     assert out["occurrences"][0] == {"type": "article", "type_label": "article", "identifier": "no article",
                                      "type_description": 'A wrong, missing or extra "a/an" or "the".',
                                      "type_example": '"the people are selfish" instead of "people are selfish"',
-                                     "original": "the people", "corrected": "people", "count": 3,
+                                     "original": "the people", "corrected": "people",
+                                     "reason": "people in general take no article", "count": 3,
                                      "is_recurring": True}
     assert len(out["occurrences"]) == 3
-    assert out["summary"] == "One mistake."
+    assert "summary" not in out
     assert out["corrected_prompt"] == "people"
     assert (tmp_path / "grammar.db").exists()
     assert run("stop_hook.py", stop_payload(transcript), tmp_path) is None
@@ -112,7 +115,8 @@ def test_stop_hook_reads_reply_not_yet_in_transcript(tmp_path, write_transcript)
     assert out["occurrences"] == [{"type": "article", "type_label": "article", "identifier": "the",
                                    "type_description": 'A wrong, missing or extra "a/an" or "the".',
                                    "type_example": '"the people are selfish" instead of "people are selfish"',
-                                   "original": "use remote control", "corrected": "use the remote", "count": 1,
+                                   "original": "use remote control", "corrected": "use the remote",
+                                   "reason": None, "count": 1,
                                    "is_recurring": False}]
 
 
@@ -128,7 +132,7 @@ def test_stop_hook_reads_check_from_first_block_of_reply(tmp_path, write_transcr
     payload = {"input_mode": "typed", "corrected_prompt": "fine", "mistakes": []}
     transcript = write_transcript([user("u1", "fine"), assistant("a1", block(payload)), assistant("a2", "Last block.")])
     out = run("stop_hook.py", {**stop_payload(transcript), "last_assistant_message": "Last block."}, tmp_path)
-    assert out["summary"] == "One mistake."
+    assert out["corrected_prompt"] == "fine"
     assert out["occurrences"] == []
 
 

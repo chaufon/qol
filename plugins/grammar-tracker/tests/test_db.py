@@ -58,8 +58,8 @@ def check(*mistakes):
     return Check(input_mode="typed", corrected_prompt="corrected", mistakes=list(mistakes))
 
 
-def m(type_, identifier, n=""):
-    return Mistake(type=type_, identifier=identifier, original=f"orig{n}", corrected=f"fix{n}")
+def m(type_, identifier, n="", reason=None):
+    return Mistake(type=type_, identifier=identifier, original=f"orig{n}", corrected=f"fix{n}", reason=reason)
 
 
 def save(conn, uuid, c):
@@ -102,15 +102,29 @@ def test_top_mistakes_ranks_by_count_with_latest_example(tmp_path):
     ]
 
 
+def test_reason_is_saved_and_reported_with_the_latest_example(tmp_path):
+    conn = connect(tmp_path / "g.db")
+    saved = save(conn, "u1", check(m("article", "the", 1, "a known remote"), m("spelling", "necessity", 2)))
+    assert [o.reason for o in saved] == ["a known remote", None]
+    save(conn, "u2", check(m("article", "the", 3, "one specific file")))
+    assert [(o.identifier, o.reason) for o in top_mistakes(conn, 10)] == [
+        ("the", "one specific file"), ("necessity", None)]
+
+
 def test_top_mistakes_empty_database(tmp_path):
     assert top_mistakes(connect(tmp_path / "g.db"), 10) == []
 
 
-def test_new_database_has_seed_types_and_version_2(tmp_path):
+def occurrence_columns(conn):
+    return [row[1] for row in conn.execute("PRAGMA table_info(occurrences)")]
+
+
+def test_new_database_has_seed_types_and_version_3(tmp_path):
     conn = connect(tmp_path / "g.db")
     types = {t.key: t for t in all_types(conn)}
     assert list(types) == SEED_KEYS
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert "reason" in occurrence_columns(conn)
     assert types["word_choice"].description == "A real English word that does not mean what you meant."
     assert types["false_friend"].example == '"actually" instead of "currently"'
     assert types["other"].example is None
@@ -119,12 +133,14 @@ def test_new_database_has_seed_types_and_version_2(tmp_path):
 def test_migration_keeps_every_saved_row(tmp_path):
     path = tmp_path / "g.db"
     old_database(path, [(1, "article", "the"), (2, "spelling", "necessity")], [(1, 1), (1, 2), (2, 1)])
-    queries = ["SELECT * FROM prompts", "SELECT id, type, identifier FROM mistakes", "SELECT * FROM occurrences"]
+    queries = ["SELECT * FROM prompts", "SELECT id, type, identifier FROM mistakes",
+               "SELECT id, prompt_id, mistake_id, original_sentence, corrected_sentence FROM occurrences"]
     old = sqlite3.connect(path)
     before = [old.execute(q).fetchall() for q in queries]
     old.close()
     conn = connect(path)
     assert [conn.execute(q).fetchall() for q in queries] == before
+    assert conn.execute("SELECT DISTINCT reason FROM occurrences").fetchall() == [(None,)]
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
@@ -138,17 +154,35 @@ def test_migration_rewrites_unknown_type_to_other_and_merges(tmp_path):
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
+def version_2_database(path):
+    """Build a version 2 database: occurrences without the reason column, and one saved word_choice mistake."""
+    conn = connect(path)
+    save(conn, "u1", check(m("word_choice", "currently")))
+    conn.execute("ALTER TABLE occurrences DROP COLUMN reason")
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    return conn
+
+
 def version_1_database(path, word_choice=WORD_CHOICE_1):
     """Build a version 1 database: the version 1 types, 'other' at position 12, and one saved word_choice mistake."""
-    conn = connect(path)
+    conn = version_2_database(path)
     conn.execute(f"DELETE FROM mistake_types WHERE key IN {ADDED_IN_2}")
     conn.execute("UPDATE mistake_types SET position = 12 WHERE key = 'other'")
     conn.execute("UPDATE mistake_types SET description = ?, example = ?, identifier_rule = ? WHERE key = 'word_choice'",
                  word_choice)
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
-    save(conn, "u1", check(m("word_choice", "currently")))
     conn.close()
+
+
+def test_migration_from_2_adds_reason(tmp_path):
+    version_2_database(tmp_path / "g.db").close()
+    conn = connect(tmp_path / "g.db")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("SELECT original_sentence, reason FROM occurrences").fetchall() == [("orig", None)]
+    assert [o.reason for o in save(conn, "u2", check(m("article", "the", reason="a known remote")))] == [
+        "a known remote"]
 
 
 def test_migration_from_1_adds_types_before_other(tmp_path):
@@ -159,7 +193,8 @@ def test_migration_from_1_adds_types_before_other(tmp_path):
     assert [t.position for t in types] == list(range(1, 18))
     assert types[10].description == "A real English word that does not mean what you meant."
     assert conn.execute("SELECT type, identifier FROM mistakes").fetchall() == [("word_choice", "currently")]
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert "reason" in occurrence_columns(conn)
 
 
 def test_migration_from_1_keeps_edited_word_choice(tmp_path):
@@ -173,7 +208,7 @@ def test_connect_twice_changes_nothing(tmp_path):
     connect(tmp_path / "g.db").close()
     conn = connect(tmp_path / "g.db")
     assert len(all_types(conn)) == 17
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
 def test_connect_on_migrated_database_from_second_connection_changes_nothing(tmp_path):

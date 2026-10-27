@@ -6,13 +6,14 @@ export type Occurrence = {
   identifier: string
   original: string
   corrected: string
+  reason: string | null
   count: number
   isRecurring: boolean
 }
 
 export type GrammarCheck =
   | { doesNotApply: true }
-  | { doesNotApply: false; summary: string; correctedPrompt: string; occurrences: Occurrence[] }
+  | { doesNotApply: false; correctedPrompt: string; occurrences: Occurrence[] }
 
 export type PaneTab = 'last' | 'top'
 
