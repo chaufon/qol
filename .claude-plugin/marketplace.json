@@ -20,6 +20,11 @@
       "name": "file-links",
       "source": "./plugins/file-links",
       "description": "Makes the file references in Claude's replies clickable and opens the file at that line in a side pane"
+    },
+    {
+      "name": "conversation-usage",
+      "source": "./plugins/conversation-usage",
+      "description": "Shows the tokens and estimated cost of the current conversation and of past conversations in a band and a pane"
     }
   ]
 }

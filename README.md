@@ -6,6 +6,7 @@ Quality-of-life mods for Claude Code.
 | --- | --- |
 | [usage-footer](plugins/usage-footer) | Shows context usage, the 5-hour and 7-day rate-limit windows and their reset times at the right of the prompt footer |
 | [grammar-tracker](plugins/grammar-tracker) | Checks the English grammar of each prompt, counts repeated mistakes, and shows the check in a band and a pane. Needs Python 3.10 or later as `python3`, on Linux, macOS and Windows |
+| [conversation-usage](plugins/conversation-usage) | Shows the tokens and estimated cost of each request of a conversation, the totals of the 5-hour and 7-day windows, and a history of stored conversations, in a band and a pane. Needs `sqlite3`, on Linux and macOS |
 | [file-links](plugins/file-links) | Makes the file references in Claude's replies clickable and opens the file at that line in a side pane. Clicks work in the fullscreen terminal |
 
 ## Install
@@ -15,6 +16,7 @@ At the prompt of a Claude Code terminal session, one line per mod:
 ```
 /plugin install usage-footer --marketplace chaufon/qol
 /plugin install grammar-tracker --marketplace chaufon/qol
+/plugin install conversation-usage --marketplace chaufon/qol
 /plugin install file-links --marketplace chaufon/qol
 ```
 
@@ -25,6 +27,7 @@ From a shell:
 ```
 claude plugin install usage-footer --marketplace chaufon/qol
 claude plugin install grammar-tracker --marketplace chaufon/qol
+claude plugin install conversation-usage --marketplace chaufon/qol
 claude plugin install file-links --marketplace chaufon/qol
 ```
 
@@ -38,6 +41,7 @@ Claude Code does not update mods from this marketplace on its own. Get a new ver
 claude plugin marketplace update qol
 claude plugin update usage-footer@qol
 claude plugin update grammar-tracker@qol
+claude plugin update conversation-usage@qol
 claude plugin update file-links@qol
 ```
 
@@ -59,6 +63,7 @@ Remove one mod and keep the marketplace:
 ```
 claude plugin uninstall usage-footer@qol
 claude plugin uninstall grammar-tracker@qol
+claude plugin uninstall conversation-usage@qol
 claude plugin uninstall file-links@qol
 ```
 
