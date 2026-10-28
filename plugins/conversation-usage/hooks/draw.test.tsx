@@ -165,12 +165,35 @@ test('History with no stored conversations says so', async ($, on) => {
   await ui.unmount()
 })
 
-test('empty conversation and a notice', async ($, on) => {
-  seed(on, { current: null, notice: 'sqlite3 is missing' })
+test('a conversation with no requests shows zero and the window totals', async ($, on) => {
+  seed(on, { ...base, current: { ...CONVERSATION, requests: [] }, notice: 'sqlite3 is missing' })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const all = await texts(ui)
-  expect(all).toContain('No requests yet in this conversation.')
+  expect(all).toContain('Conversation')
+  expect(all).toContain('5-hour window (')
   expect(all).toContain('sqlite3 is missing')
+  await ui.unmount()
+})
+
+test('a conversation not read yet shows the window totals', async ($, on) => {
+  seed(on, { ...base, current: null, view: 'cost' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const all = await texts(ui)
+  expect(all).toContain('5-hour window (')
+  expect(all).toContain('$0.00')
+  await ui.unmount()
+})
+
+test('the Prices tab lists every price of a model and the factors', async ($, on) => {
+  seed(on, { ...base, tab: 'prices' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const all = await texts(ui)
+  expect(all).toContain('USD per million tokens')
+  expect(all).toContain('write 1h')
+  expect(all).toContain('claude-haiku-5-5')
+  expect(all).toContain('$0.125')
+  expect(all).toContain('Fast mode on claude-opus-5-5 and claude-opus-5')
+  expect(all).not.toContain('Tokens')
   await ui.unmount()
 })
 
@@ -230,6 +253,8 @@ test('the tab and grouping switches change what is drawn', async ($, on) => {
   expect(await texts(ui)).toContain('Today · ')
   await press($, ui, 'group-next')
   expect(await texts(ui)).toContain('5-hour · ')
+  await press($, ui, 'tab-next')
+  expect(await texts(ui)).toContain('USD per million tokens')
   await press($, ui, 'tab-next')
   await clock.settle()
   await ui.redraw()

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { COLORS, dayLabel, fmtCost, fmtTokens, PROJECT_PALETTE, projectColor, projectLabel } from './format'
+import { COLORS, dayLabel, fmtCost, fmtPrice, fmtTokens, PROJECT_PALETTE, projectColor, projectLabel } from './format'
 
 test('fmtTokens shortens counts', () => {
   expect(fmtTokens(0)).toBe('0')
@@ -14,6 +14,13 @@ test('fmtTokens shortens counts', () => {
   expect(fmtTokens(999_949)).toBe('999.9k')
   expect(fmtTokens(999_950)).toBe('1.0M')
   expect(fmtTokens(999_999)).toBe('1.0M')
+})
+
+test('fmtPrice shows two decimals, or three when the third is not 0', () => {
+  expect(fmtPrice(10)).toBe('$10.00')
+  expect(fmtPrice(0.3)).toBe('$0.30')
+  expect(fmtPrice(0.125)).toBe('$0.125')
+  expect(fmtPrice(0.01)).toBe('$0.01')
 })
 
 test('fmtCost shows dollars with two decimals, or ? when unknown', () => {

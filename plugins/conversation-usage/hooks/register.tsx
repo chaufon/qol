@@ -14,7 +14,7 @@ import { currentWindows, observe } from './windows'
 const PANE = 'conversation-usage'
 const VIEWS: View[] = ['tokens', 'cost', 'both', 'chart']
 const GROUPINGS: Grouping[] = ['date', 'project', 'window']
-const TABS: Tab[] = ['conversation', 'history']
+const TABS: Tab[] = ['conversation', 'history', 'prices']
 
 const isOpen = atom({ plugin: 'conversation-usage', key: 'isOpen' } as const, false)
 const tab = atom({ plugin: 'conversation-usage', key: 'tab' } as const, 'conversation')

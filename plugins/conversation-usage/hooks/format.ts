@@ -22,6 +22,9 @@ export const fmtTokens = (n: number): string => {
 
 export const fmtCost = (c: number | null): string => (c === null ? '?' : `$${c.toFixed(2)}`)
 
+// A price per million tokens: two decimals, or three when the third is not 0 ($0.125).
+export const fmtPrice = (p: number): string => `$${p.toFixed(Math.round(p * 1000) % 10 === 0 ? 2 : 3)}`
+
 const pad = (n: number): string => String(n).padStart(2, '0')
 
 export const hhmm = (ms: number): string => {

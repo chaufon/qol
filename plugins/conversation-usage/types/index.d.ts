@@ -18,7 +18,7 @@ export type WindowKind = 'five_hour' | 'seven_day'
 export type Window = { kind: WindowKind; start: number; end: number; percentUsed: number }
 export type WindowTotal = { window: Window; usage: Usage }
 
-export type Tab = 'conversation' | 'history'
+export type Tab = 'conversation' | 'history' | 'prices'
 export type View = 'tokens' | 'cost' | 'both' | 'chart'
 export type Grouping = 'date' | 'project' | 'window'
 

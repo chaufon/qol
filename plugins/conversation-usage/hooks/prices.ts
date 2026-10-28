@@ -2,7 +2,7 @@ import type { Costs, Request, Tokens } from '../types'
 
 type Price = { input: number; cacheRead: number; output: number }
 
-// USD per million tokens. A 5-minute cache write costs 1.25 x input, a 1-hour cache write 2 x input.
+// USD per million tokens. A cache write costs input x CACHE_WRITE_5M or x CACHE_WRITE_1H.
 export const PRICES: Record<string, Price> = {
   'claude-fable-5-1': { input: 10, cacheRead: 0.25, output: 50 },
   'claude-mythos-5-1': { input: 10, cacheRead: 0.25, output: 50 },
@@ -20,11 +20,13 @@ export const PRICES: Record<string, Price> = {
   'claude-haiku-4-5': { input: 1, cacheRead: 0.1, output: 5 },
 }
 
-const FAST_MODELS = ['claude-opus-5-5', 'claude-opus-5']
-const LONG_CONTEXT_MODEL = 'claude-haiku-5-5'
-const LONG_CONTEXT_TOKENS = 100_000
-const LONG_CONTEXT_FACTOR = 5
-const FAST_FACTOR = 2
+export const CACHE_WRITE_5M = 1.25
+export const CACHE_WRITE_1H = 2
+export const FAST_MODELS = ['claude-opus-5-5', 'claude-opus-5']
+export const LONG_CONTEXT_MODEL = 'claude-haiku-5-5'
+export const LONG_CONTEXT_TOKENS = 100_000
+export const LONG_CONTEXT_FACTOR = 5
+export const FAST_FACTOR = 2
 
 export const ZERO_TOKENS: Tokens = { input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 }
 
@@ -71,7 +73,7 @@ export const costOf = (r: Pick<Request, 'model' | 'tokens' | 'isFast'>): Costs |
   if (r.isFast && FAST_MODELS.includes(key)) factor *= FAST_FACTOR
   const perToken = (rate: number) => (rate * factor) / 1e6
   const input = t.input * perToken(price.input)
-  const cacheWrite = t.cacheWrite5m * perToken(price.input * 1.25) + t.cacheWrite1h * perToken(price.input * 2)
+  const cacheWrite = t.cacheWrite5m * perToken(price.input * CACHE_WRITE_5M) + t.cacheWrite1h * perToken(price.input * CACHE_WRITE_1H)
   const cacheRead = t.cacheRead * perToken(price.cacheRead)
   const output = t.output * perToken(price.output)
   return { input, cacheWrite, cacheRead, output, total: input + cacheWrite + cacheRead + output }
