@@ -10,9 +10,12 @@ A line in the band above the prompt holds the conversation total and a `Show` bu
 Usage · 372.3k tokens · $0.74   Show
 ```
 
-The button opens a `Usage` pane. The pane is closed by default and never opens by itself.
+The button opens a `◔ Usage` pane. The pane is closed by default and never opens by itself.
 
 ## Pane
+
+The pane's top rows switch the tab, the view and the grouping; the shown one has a colored background. Its last row
+holds the keys of the tab on show, and stays at the bottom while the pane scrolls.
 
 - **Conversation** tab: one row per prompt, with its number, its time, its first line, the totals of every request
   it started, and its request count (`▸ N`). A click on a prompt opens its requests; the last prompt is open until
@@ -46,6 +49,7 @@ project is the last segment of the working directory it started in.
 | `t` | Switch tab | the pane |
 | `v` | Next view | the Conversation and History tabs |
 | `g` | Next grouping | the History tab |
+| `h` | Close the pane | the pane |
 | Enter or click | Open or close the focused row or card | the pane |
 | Esc | Close the pane | the pane |
 

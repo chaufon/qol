@@ -25,6 +25,7 @@ export type PaneProps = {
   width: number; tab: Tab; view: View; grouping: Grouping; current: Conversation | null
   windowTotals: WindowTotal[]; history: History; details: Record<string, Conversation>
   expanded: Record<string, boolean>; notice: string | null; now: number; isFullscreen: boolean
+  scroll: { offset: number; bodyRows: number }
 }
 
 type Ui = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
@@ -32,6 +33,7 @@ type El = JSX.Element
 type Ctx = { ui: Ui; view: View; width: number; isFullscreen: boolean; scale: number; actions: Actions }
 
 const HOVER = { backgroundColor: '#3a3f4b' }
+const ACCENT = 'planMode'
 const STRIPE = '#23272e'
 const BAND = '#1b1e23'
 const WHITE = '#ffffff'
@@ -384,18 +386,38 @@ function pricesTab(c: Ctx): El[] {
 }
 
 // A row of switch choices: the current one is bold and inverse; `key` presses the next one.
-function switchView<T extends string>(
-  c: Ctx, id: string, hotkey: string, choices: [T, string][], current: T, select: (t: T) => void, next: () => void,
-): El {
+function switchView<T extends string>(c: Ctx, id: string, choices: [T, string][], current: T, select: (t: T) => void): El {
   const { Box, Button, Text } = c.ui
   return (
     <Box gap={1}>
       {choices.map(([value, label]) => (
         <Button key={`${id}-${value}`} plain onPress={() => select(value)}>
-          {value === current ? <Text bold inverse>{` ${label} `}</Text> : <Text dimColor>{` ${label} `}</Text>}
+          {value === current
+            ? <Text bold color="inverseText" backgroundColor={ACCENT}>{` ${label} `}</Text>
+            : <Text dimColor>{` ${label} `}</Text>}
         </Button>
       ))}
-      <Button key={`${id}-next`} plain hotkey={hotkey} dimColor onPress={next}>→</Button>
+    </Box>
+  )
+}
+
+// The keys of the views on show, on the last row the pane shows: the pane has no footer of its own, so the row moves with the scroll.
+function footer(c: Ctx, p: PaneProps): El {
+  const { Box, Button, Text } = c.ui
+  const keys: [string, string, string, () => void][] = [
+    ['tab-next', 't', 'Tab', c.actions.nextTab],
+    ...(p.tab === 'prices' ? [] : [['view-next', 'v', 'View', c.actions.nextView] as [string, string, string, () => void]]),
+    ...(p.tab === 'history' ? [['group-next', 'g', 'Group', c.actions.nextGrouping] as [string, string, string, () => void]] : []),
+    ['hide', 'h', 'Hide', c.actions.hide],
+  ]
+  const used = keys.reduce((n, [, hotkey, label]) => n + hotkey.length + label.length + 4, 0)
+  return (
+    <Box position="absolute" top={p.scroll.offset + p.scroll.bodyRows - 1} left={0} width={p.width}>
+      {keys.map(([key, hotkey, label, press]) => [
+        <Button key={key} plain hotkey={hotkey} dimColor onPress={press}>{label}</Button>,
+        <Text key={`${key}-gap`}>{'  '}</Text>,
+      ])}
+      <Text>{' '.repeat(Math.max(0, p.width - used))}</Text>
     </Box>
   )
 }
@@ -405,22 +427,19 @@ export function drawPane(ui: Ui, p: PaneProps, actions: Actions): El {
   const c: Ctx = { ui, view: p.view, width: p.width, isFullscreen: p.isFullscreen, scale: 1, actions }
   const tabs: [Tab, string][] = [['conversation', 'Conversation'], ['history', 'History'], ['prices', 'Prices']]
   return (
-    <Box flexDirection="column" width={p.width}>
-      <Box gap={2}>
-        {switchView(c, 'tab', 't', tabs, p.tab, actions.selectTab, actions.nextTab)}
-        <Button key="hide" plain onPress={actions.hide}>Hide</Button>
-      </Box>
+    <Box flexDirection="column" width={p.width} minHeight={p.scroll.bodyRows} paddingBottom={1}>
+      <Text dimColor>{'─'.repeat(p.width)}</Text>
+      {switchView(c, 'tab', tabs, p.tab, actions.selectTab)}
       {p.tab === 'prices' ? null : (
         <Box gap={2}>
-          {switchView(c, 'view', 'v', VIEWS, p.view, actions.selectView, actions.nextView)}
-          {p.tab === 'history'
-            ? switchView(c, 'group', 'g', GROUPINGS, p.grouping, actions.selectGrouping, actions.nextGrouping)
-            : null}
+          {switchView(c, 'view', VIEWS, p.view, actions.selectView)}
+          {p.tab === 'history' ? switchView(c, 'group', GROUPINGS, p.grouping, actions.selectGrouping) : null}
         </Box>
       )}
       <Text dimColor>{'─'.repeat(p.width)}</Text>
       {p.notice === null ? null : <Text dimColor>{p.notice}</Text>}
       {p.tab === 'conversation' ? conversationTab(c, p) : p.tab === 'history' ? historyTab(c, p) : pricesTab(c)}
+      {footer(c, p)}
     </Box>
   )
 }

@@ -10,6 +10,7 @@ const PYTHON_PROBE = ['-c', 'import sys; print(sys.version_info[0])']
 const NO_PYTHON = 'Grammar tracker needs Python 3.10 or newer as python3, py or python on the PATH'
 
 const PANE = 'grammar'
+const ACCENT = 'planMode'
 const CHECK_LABEL = '**English grammar check:**'
 const NOT_APPLY = 'English grammar check does not apply'
 const NOT_APPLY_LINE = 'Grammar check does not apply to the last prompt'
@@ -162,7 +163,7 @@ async function refreshTop($: EngineInterface) {
 
 async function openPane($: EngineInterface) {
   await update($, isOpen, () => true)
-  await $.ui.open({ id: PANE, title: 'Grammar', focus: true, closeOnEscape: true })
+  await $.ui.open({ id: PANE, title: '✎ Grammar', focus: true, closeOnEscape: true })
   await refreshTop($)
 }
 
@@ -228,8 +229,26 @@ export const register: Register = on => {
     const current: PaneTab = await read($, tab)
     const tabButton = (id: PaneTab, label: string) => (
       <Button key={`tab-${id}`} plain onPress={() => update($, tab, () => id)}>
-        {current === id ? `[${label}]` : label}
+        {current === id
+          ? <Text bold color="inverseText" backgroundColor={ACCENT}>{` ${label} `}</Text>
+          : <Text dimColor>{` ${label} `}</Text>}
       </Button>
+    )
+    // The keys, on the last row the pane shows: the pane has no footer of its own, so the row moves with the scroll.
+    const { offset, bodyRows } = e.props.scroll
+    const keys: [string, string, string, () => void][] = [
+      ['tab-next', 't', 'Tab', () => void update($, tab, t => (t === 'last' ? 'top' : 'last'))],
+      ['hide', 'h', 'Hide', () => void closePane($)],
+    ]
+    const used = keys.reduce((n, [, hotkey, label]) => n + hotkey.length + label.length + 4, 0)
+    const footer = (
+      <Box position="absolute" top={offset + bodyRows - 1} left={0} width={width}>
+        {keys.map(([key, hotkey, label, press]) => [
+          <Button key={key} plain hotkey={hotkey} dimColor onPress={press}>{label}</Button>,
+          <Text key={`${key}-gap`}>{'  '}</Text>,
+        ])}
+        <Text>{' '.repeat(Math.max(0, width - used))}</Text>
+      </Box>
     )
 
     // A bordered card whose title is painted over its top border, cut with an ellipsis where the border is too short.
@@ -306,11 +325,11 @@ export const register: Register = on => {
 
     const topMistakes = await read($, top)
     return (
-      <Box flexDirection="column" width={width}>
-        <Box gap={2}>
+      <Box flexDirection="column" width={width} minHeight={bodyRows} paddingBottom={1}>
+        <Text dimColor>{'─'.repeat(width)}</Text>
+        <Box gap={1}>
           {tabButton('last', 'Last prompt')}
           {tabButton('top', 'Top mistakes')}
-          <Button key="hide" plain onPress={() => closePane($)}>Hide</Button>
         </Box>
         <Text dimColor>{'─'.repeat(width)}</Text>
         {current === 'top' ? (
@@ -328,6 +347,7 @@ export const register: Register = on => {
         ) : (
           lastTab(check)
         )}
+        {footer}
       </Box>
     )
   })

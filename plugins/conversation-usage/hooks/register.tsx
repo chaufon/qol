@@ -131,7 +131,7 @@ async function saveReadings($: EngineInterface, readings: { kind: string; percen
 
 async function openPane($: EngineInterface): Promise<void> {
   await update($, isOpen, () => true)
-  await $.ui.open({ id: PANE, title: 'Usage', focus: true, closeOnEscape: true })
+  await $.ui.open({ id: PANE, title: '◔ Usage', focus: true, closeOnEscape: true })
   if ((await read($, history)) === null) await loadHistoryAtom($)
   void queueRefresh($)
 }
@@ -235,6 +235,7 @@ export const register: Register = (on) => {
         notice: await read($, notice),
         now: await read($, now),
         isFullscreen: e.viewport?.isFullscreen === true,
+        scroll: e.props.scroll,
       },
       actionsFor($),
     )

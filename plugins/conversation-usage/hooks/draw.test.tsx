@@ -280,3 +280,18 @@ test('the tab and grouping switches change what is drawn', async ($, on) => {
   expect(await texts(ui)).toContain('18.4k')
   await ui.unmount()
 })
+
+test('the footer holds the keys of the tab on show, on the last row the pane shows', async ($, on) => {
+  seed(on, { ...base, history: HISTORY })
+  answerHistory(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const labels = async () => (await ui.findAll({ type: 'Button' })).filter((b) => b.props.hotkey !== undefined).map((b) => b.text)
+  expect(await labels()).toEqual(['Tab', 'View', 'Hide'])
+  await press($, ui, 'tab-history')
+  expect(await labels()).toEqual(['Tab', 'View', 'Group', 'Hide'])
+  await press($, ui, 'tab-next')
+  expect(await labels()).toEqual(['Tab', 'Hide'])
+  const footer = (await ui.findAll({ type: 'Box' })).find((b) => b.props.position === 'absolute')
+  expect(footer?.props.top).toBe(29)
+  await ui.unmount()
+})

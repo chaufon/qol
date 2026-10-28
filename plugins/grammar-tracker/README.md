@@ -98,11 +98,14 @@ The `mistake_types` table in the database holds the types of mistake. Its column
   skipped check, or a failed one). Its `Show` button is always there, so the **Top mistakes** tab is always reachable.
 - A mistake is recurring when its counter, across all prompts, reaches `RECURRING_THRESHOLD = 3`
   (`scripts/lib/config.py`).
-- Open the `grammar` pane with a click on `Show` (fullscreen terminal) or with `ctrl+x tab` then `g`. Close it with
-  `Hide` in the band or the pane, with `g` while the band has the focus, or with Esc in the pane. It is closed by
+- Open the `✎ Grammar` pane with a click on `Show` (fullscreen terminal) or with `ctrl+x tab` then `g`. Close it with
+  `Hide` in the band or the pane, with `g` while the band has the focus, or with `h` or Esc in the pane. It is closed by
   default and stays open across replies.
 - Claude Code places the pane: a sidebar on the right in the fullscreen layout at 110 columns or more, otherwise a box
   above the prompt.
+- The pane's top row switches between its two tabs; the shown one has a colored background. Its last row holds the
+  keys, `t: Tab` and `h: Hide`, and stays at the bottom while the pane scrolls. `t` switches the tab while the pane
+  has the focus.
 - **Last prompt** tab: one card per mistake. The card's border shows the number, type, identifier and counter
   (`1 · Word choice · "looks like" ×3 ⟳`). Inside are the original sentence in red (`✗`), the corrected sentence in
   green (`✓`), Claude's reason, and the type's description and example, dimmed. Recurring mistakes have a yellow

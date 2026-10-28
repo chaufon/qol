@@ -132,7 +132,7 @@ async function openFile($: EngineInterface, href: string) {
   const cwd = slashes(await $.session.cwd())
   const file: ShownFile = { ...reference, label: labelOf(cwd, reference.path), opened: Date.now() }
   await update($, shown, () => file)
-  await $.ui.open({ id: PANE, title: baseName(file.path), closeOnEscape: true })
+  await $.ui.open({ id: PANE, title: `≡ ${baseName(file.path)}`, closeOnEscape: true })
   await scrollToLine($, file)
 }
 
@@ -207,6 +207,7 @@ export const register: Register = on => {
       from > to ? null : <Code source={lines.slice(from - 1, to).join('\n')} path={file.path} startLine={from} />
     return (
       <Box flexDirection="column" width={e.props.bodyColumns}>
+        <Text dimColor>{'─'.repeat(e.props.bodyColumns)}</Text>
         <Text bold>{header}</Text>
         <Text dimColor>{`${lines.length} lines${last < lines.length || first > 1 ? `, showing ${first}-${last}` : ''}`}</Text>
         {target === null ? (

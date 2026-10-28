@@ -301,3 +301,18 @@ test('a Top mistakes row with the largest count and the recurring mark fits the 
     expect(row.length).toBe(80)
   }
 })
+
+test('the footer key t switches between the tabs, and the tab on show is colored', async ($, on) => {
+  engine(on, JSON.stringify(STOP_OUTPUT))
+  await $.turn.complete(TURN)
+  const pane = await $.ui.mount(PANE)
+  const keys = (await pane.findAll({ type: 'Button' })).filter(b => b.props.hotkey !== undefined).map(b => b.props.hotkey)
+  expect(keys).toEqual(['t', 'h'])
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-next' })
+  await pane.redraw()
+  const shown = async () => (await pane.findAll({ type: 'Text' })).find(t => t.props.backgroundColor === 'planMode')?.text
+  expect(await shown()).toBe(' Top mistakes ')
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-next' })
+  await pane.redraw()
+  expect(await shown()).toBe(' Last prompt ')
+})
