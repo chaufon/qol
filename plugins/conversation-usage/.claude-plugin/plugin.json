@@ -1,6 +1,6 @@
 {
   "name": "conversation-usage",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shows the tokens and estimated cost of the current conversation and of past conversations",
   "license": "MIT",
   "author": { "name": "Chaufon", "url": "https://github.com/chaufon" },
