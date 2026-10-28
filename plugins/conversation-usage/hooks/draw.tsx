@@ -163,20 +163,20 @@ function conversationView(c: Ctx, rows: Row[], lead: string | null): El[] {
   })
 }
 
-function headerLine(c: Ctx): El {
+// The column names over the rows. `head(w)` names the leading columns in exactly w cells.
+function headerLine(c: Ctx, head: (w: number) => string): El {
   const { Text } = c.ui
   const labelW = c.width - FIGURES - MARK
   if (c.view === 'chart') {
-    const barW = Math.max(6, c.width - NUM - TIME - CHART_TOOLS - 2 * COL - MARK - 1)
-    return (
-      <Text dimColor>
-        {`${cell('#', NUM)}${cell('time', TIME)}${cell('tools', CHART_TOOLS)}${cell('bar', barW + 1)}${rcell('tokens', COL)}${rcell('cost', COL)}`}
-      </Text>
-    )
+    const headW = NUM + TIME + CHART_TOOLS
+    const barW = Math.max(6, c.width - headW - 2 * COL - MARK - 1)
+    return <Text dimColor>{`${head(headW)}${cell('bar', barW + 1)}${rcell('tokens', COL)}${rcell('cost', COL)}`}</Text>
   }
   const names = ['input', 'c.write', 'c.read', 'output', 'total'].map((n) => rcell(n, COL)).join('')
-  return <Text dimColor>{`${cell('#', NUM)}${cell('time', TIME)}${cell('tools', labelW - NUM - TIME)}${names}`}</Text>
+  return <Text dimColor>{`${head(labelW)}${names}`}</Text>
 }
+
+const requestHead = (w: number): string => `${cell('#', NUM)}${cell('time', TIME)}${cell('tools', w - NUM - TIME)}`
 
 function legend(c: Ctx): El {
   const { Text } = c.ui
@@ -220,7 +220,7 @@ function conversationTab(c: Ctx, p: PaneProps): El[] {
   const sized = { ...c, scale: scaleOf(rows) }
   return [
     ...(c.view === 'chart' ? [legend(c)] : []),
-    headerLine(c),
+    headerLine(c, requestHead),
     ...conversationView(sized, rows, null),
     ...totalsView(c, current, p.windowTotals),
   ]
@@ -306,7 +306,11 @@ function historyTab(c: Ctx, p: PaneProps): El[] {
   if ('error' in data) return [<Text color="error">{data.error}</Text>]
   if (data.conversations.length === 0) return [<Text dimColor>No stored conversations yet.</Text>]
   const nodes = historyTree(data, p.grouping, p.now, p.expanded)
-  return [...(c.view === 'chart' ? [legend(c)] : []), ...nodes.map((n, i) => nodeView(c, n, p, i))]
+  return [
+    ...(c.view === 'chart' ? [legend(c)] : []),
+    headerLine(c, (w) => ' '.repeat(w)),
+    ...nodes.map((n, i) => nodeView(c, n, p, i)),
+  ]
 }
 
 // A row of switch choices: the current one is bold and inverse; `key` presses the next one.

@@ -128,6 +128,22 @@ test('History by date shows Today, the project card and a collapsed conversation
   }
 })
 
+test('History names the token columns', async ($, on) => {
+  seed(on, { ...base, tab: 'history', history: HISTORY })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const all = await texts(ui)
+  for (const n of ['input', 'c.write', 'c.read', 'output', 'total']) expect(all).toContain(n)
+  await ui.unmount()
+})
+
+test('History names the chart columns', async ($, on) => {
+  seed(on, { ...base, tab: 'history', history: HISTORY, view: 'chart' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const all = await texts(ui)
+  expect(all).toMatch(/bar +tokens +cost/)
+  await ui.unmount()
+})
+
 test('History shows Loading… before the data arrives', async ($, on) => {
   seed(on, { ...base, tab: 'history', history: null })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
