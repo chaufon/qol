@@ -2,8 +2,8 @@ import type { Elements } from 'claude-code'
 
 import type { Conversation, Costs, Grouping, History, Request, Tab, Tokens, Usage, View, WindowTotal } from '../types'
 import { COLORS, fmtCost, fmtPrice, fmtTokens, hhmm, weekday } from './format'
-import { conversationRows, historyTree, sumUsage } from './model'
-import type { Node, Row } from './model'
+import { conversationRows, historyTree, promptGroups, sumUsage } from './model'
+import type { Node, PromptGroup, Row } from './model'
 import {
   CACHE_WRITE_1H, CACHE_WRITE_5M, FAST_FACTOR, FAST_MODELS, LONG_CONTEXT_FACTOR, LONG_CONTEXT_MODEL,
   LONG_CONTEXT_TOKENS, PRICES, ZERO_TOKENS,
@@ -183,7 +183,7 @@ function headerLine(c: Ctx, head: (w: number) => string): El {
   return <Text dimColor>{`${head(labelW)}${names}`}</Text>
 }
 
-const requestHead = (w: number): string => `${cell('#', NUM)}${cell('time', TIME)}${cell('tools', w - NUM - TIME)}`
+const requestHead = (w: number): string => `${cell('#', NUM)}${cell('time', TIME)}${cell('prompt / tools', w - NUM - TIME)}`
 
 function legend(c: Ctx): El {
   const { Text } = c.ui
@@ -220,14 +220,54 @@ function totalsView(c: Ctx, requests: Request[], windowTotals: WindowTotal[]): E
   return out
 }
 
+// A prompt line, a Button ending `▸ N` or `▾ N`, with its requests below it when open.
+// `scale` fills the prompt's bar; `rowScale` the bars of its requests.
+function promptView(c: Ctx, g: PromptGroup, scale: number, rowScale: number, lead: string | null, index: number): El {
+  const { Box, Button, Text } = c.ui
+  const press = () => c.actions.toggle(g.key, g.isOpen)
+  const head = (w: number) => [
+    <Text dimColor>{cell(g.at === null ? '' : String(g.number), NUM)}</Text>,
+    <Text dimColor>{cell(g.at === null ? '' : hhmm(g.at), TIME)}</Text>,
+    <Text bold color={WHITE}>{cell(g.text, w - NUM - TIME)}</Text>,
+  ]
+  const lines = viewLines(c, head, g.usage, marker(g.isOpen, g.count), scale).map((l, n) => (
+    <Button key={n === 0 ? g.key : `${g.key}:more`} plain onPress={press}>{l}</Button>
+  ))
+  const inner = g.isOpen ? conversationView({ ...c, width: c.width - 2, scale: rowScale }, g.rows, `${lead ?? ''}│ `) : []
+  return (
+    <Box key={`row:${g.key}`} flexDirection="column" backgroundColor={index % 2 === 1 ? STRIPE : undefined}>
+      {lead === null ? lines : lines.map((l) => (
+        <Box>
+          <Text dimColor>{lead}</Text>
+          {l}
+        </Box>
+      ))}
+      {inner}
+    </Box>
+  )
+}
+
+// The requests of a conversation under the prompts that started them; the requests alone when it has no prompts.
+function requestsView(
+  c: Ctx, conv: Conversation, p: PaneProps, prefix: string, range: [number, number] | undefined,
+  isLastOpen: boolean, lead: string | null,
+): El[] {
+  const groups = promptGroups(conv, (k) => p.expanded[k], prefix, range, isLastOpen)
+  if (groups === null) {
+    const rows = conversationRows(conv, (k) => p.expanded[k] ?? false, prefix, range)
+    return conversationView({ ...c, scale: scaleOf(rows) }, rows, lead)
+  }
+  const scale = Math.max(1, ...groups.map((g) => total(g.usage.tokens)))
+  const rowScale = scaleOf(groups.flatMap((g) => g.rows))
+  return groups.map((g, i) => promptView(c, g, scale, rowScale, lead, i))
+}
+
 function conversationTab(c: Ctx, p: PaneProps): El[] {
   const current = p.current
-  const rows = current === null ? [] : conversationRows(current, (k) => p.expanded[k] ?? false, '')
-  const sized = { ...c, scale: scaleOf(rows) }
   return [
     ...(c.view === 'chart' ? [legend(c)] : []),
     headerLine(c, requestHead),
-    ...conversationView(sized, rows, null),
+    ...(current === null ? [] : requestsView(c, current, p, '', undefined, true, null)),
     ...totalsView(c, current?.requests ?? [], p.windowTotals),
   ]
 }
@@ -267,9 +307,7 @@ function conversationNode(c: Ctx, n: Node, p: PaneProps, index: number): El {
   if (n.isOpen) {
     if (!detail) inner = [<Text dimColor>Loading…</Text>]
     else {
-      const rows = conversationRows(detail, (k) => p.expanded[k] ?? false, `${n.key}/`, n.range ?? undefined)
-      const narrow = { ...c, width: c.width - 2, scale: scaleOf(rows) }
-      inner = conversationView(narrow, rows, '│ ')
+      inner = requestsView({ ...c, width: c.width - 2 }, detail, p, `${n.key}/`, n.range ?? undefined, false, '│ ')
     }
   }
   return (
@@ -380,6 +418,7 @@ export function drawPane(ui: Ui, p: PaneProps, actions: Actions): El {
             : null}
         </Box>
       )}
+      <Text dimColor>{'─'.repeat(p.width)}</Text>
       {p.notice === null ? null : <Text dimColor>{p.notice}</Text>}
       {p.tab === 'conversation' ? conversationTab(c, p) : p.tab === 'history' ? historyTab(c, p) : pricesTab(c)}
     </Box>

@@ -23,7 +23,7 @@ const req = (id: string, at: number, extra: Partial<Request> = {}): Request => (
 })
 const subagents: Subagent[] = [{ agentId: 'A', parentAgentId: null, name: 'Explore the code', toolUseId: 't1' }]
 const CONVERSATION: Conversation = {
-  id: 'c1', project: '/work/qol', title: 'Build the usage pane', startedAt: NOW - 3_600_000, subagents,
+  id: 'c1', project: '/work/qol', title: 'Build the usage pane', startedAt: NOW - 3_600_000, subagents, prompts: [],
   requests: [
     req('1', NOW - 3_000_000, { tools: ['Agent', 'Read'], toolUseIds: ['t1'], tokens: tok({ cacheWrite5m: 18_400, output: 300 }) }),
     req('2', NOW - 2_000_000, { model: 'mystery-model' }),
@@ -162,6 +162,25 @@ test('History with no stored conversations says so', async ($, on) => {
   seed(on, { ...base, tab: 'history', history: { conversations: [], windows: [], slices: [] } })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await texts(ui)).toContain('No stored conversations yet.')
+  await ui.unmount()
+})
+
+test('the Conversation tab lists prompts, the last one open, and a press closes it', async ($, on) => {
+  const prompts = [{ at: NOW - 3_100_000, text: 'Explore the repo' }, { at: NOW - 2_500_000, text: 'Write the fix' }]
+  seed(on, { ...base, current: { ...CONVERSATION, prompts } })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  let all = await texts(ui)
+  expect(all).toContain('prompt / tools')
+  expect(all).toContain('Explore the repo')
+  expect(all).toContain('Write the fix')
+  expect(all).toContain('▸ 2')
+  expect(all).toContain('▾ 1')
+  expect(all).not.toContain('Agent, Read')
+  await press($, ui, 'prompt:2')
+  all = await texts(ui)
+  expect(all).toContain('▸ 1')
+  await press($, ui, 'prompt:1')
+  expect(await texts(ui)).toContain('Agent, Read')
   await ui.unmount()
 })
 

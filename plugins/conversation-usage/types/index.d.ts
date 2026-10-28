@@ -10,8 +10,11 @@ export type Request = {
 }
 // name: meta description, else agentType. toolUseId: the Agent tool call that launched it.
 export type Subagent = { agentId: string; parentAgentId: string | null; name: string; toolUseId: string | null }
+// A prompt of the person, or a slash command, in the main transcript. text = its first line.
+export type Prompt = { at: number; text: string }
 export type Conversation = {
   id: string; project: string; title: string; startedAt: number; requests: Request[]; subagents: Subagent[]
+  prompts: Prompt[]
 }
 
 export type WindowKind = 'five_hour' | 'seven_day'

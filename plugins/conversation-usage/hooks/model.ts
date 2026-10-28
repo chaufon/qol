@@ -63,6 +63,78 @@ export const conversationRows = (
   return rows
 }
 
+export type PromptGroup = {
+  key: string; number: number; at: number | null; text: string; count: number; isOpen: boolean; usage: Usage; rows: Row[]
+}
+
+// The requests of a conversation grouped by the prompt that started them; null when it has no prompts.
+// A main request belongs to the last prompt at or before it. A subagent belongs to the group of the request
+// that launched it, else to its parent's group, else to the group of its first request's time. Requests
+// before the first prompt form group 0. Prompts that made no request, such as /clear, have no group, and
+// `number` counts only the prompts that made a request. `isOpen` answers undefined for a key never toggled: the last group
+// is then open when `isLastOpen` is set.
+export const promptGroups = (
+  c: Conversation,
+  isOpen: (key: string) => boolean | undefined,
+  prefix: string,
+  range: [number, number] | undefined,
+  isLastOpen: boolean,
+): PromptGroup[] | null => {
+  const prompts = [...(c.prompts ?? [])].sort((a, b) => a.at - b.at)
+  if (prompts.length === 0) return null
+  const groupAt = (at: number): number => {
+    let g = 0
+    prompts.forEach((p, i) => { if (p.at <= at) g = i + 1 })
+    return g
+  }
+  const groupOfRequest = new Map<Request, number>()
+  const launcher = new Map<string, number>()
+  for (const r of c.requests) {
+    if (r.agentId !== null) continue
+    const g = groupAt(r.at)
+    groupOfRequest.set(r, g)
+    for (const id of r.toolUseIds) launcher.set(id, g)
+  }
+  const firstAt = (agentId: string): number => Math.min(...c.requests.filter((r) => r.agentId === agentId).map((r) => r.at))
+  const agentGroup = new Map<string, number>()
+  const groupOfAgent = (s: Subagent, seen: Set<string> = new Set()): number => {
+    const known = agentGroup.get(s.agentId)
+    if (known !== undefined) return known
+    let g: number | undefined = s.toolUseId === null ? undefined : launcher.get(s.toolUseId)
+    const parent = c.subagents.find((p) => p.agentId === s.parentAgentId)
+    if (g === undefined && parent && !seen.has(parent.agentId)) g = groupOfAgent(parent, seen.add(s.agentId))
+    if (g === undefined) {
+      const at = firstAt(s.agentId)
+      g = Number.isFinite(at) ? groupAt(at) : prompts.length
+    }
+    agentGroup.set(s.agentId, g)
+    return g
+  }
+  for (const s of c.subagents) groupOfAgent(s)
+  for (const r of c.requests) if (r.agentId !== null) groupOfRequest.set(r, agentGroup.get(r.agentId) ?? groupAt(r.at))
+
+  const inRange = (r: Request) => !range || (range[0] <= r.at && r.at < range[1])
+  const groups: PromptGroup[] = []
+  let number = 0
+  for (let g = 0; g <= prompts.length; g++) {
+    const requests = c.requests.filter((r) => groupOfRequest.get(r) === g)
+    if (g > 0 && requests.length > 0) number++
+    const shown = requests.filter(inRange)
+    if (shown.length === 0) continue
+    const part: Conversation = { ...c, requests, subagents: c.subagents.filter((s) => agentGroup.get(s.agentId) === g) }
+    const key = `${prefix}prompt:${g}`
+    const prompt = g === 0 ? null : prompts[g - 1]!
+    groups.push({
+      key, number: g === 0 ? 0 : number, at: prompt?.at ?? null, text: prompt?.text ?? 'Before the first prompt', count: shown.length,
+      isOpen: false, usage: sumUsage(shown), rows: conversationRows(part, (k) => isOpen(k) ?? false, prefix, range),
+    })
+  }
+  groups.forEach((group, i) => {
+    group.isOpen = isOpen(group.key) ?? (isLastOpen && i === groups.length - 1)
+  })
+  return groups
+}
+
 export type Node = {
   key: string
   kind: 'day' | 'project' | 'week' | 'fiveHour' | 'conversation'

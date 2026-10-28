@@ -6,9 +6,9 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 
 import {
-  SCHEMA, selectConversation, selectHistory, selectSlices, selectSubagents, selectWindows, selectWindowTotal,
-  toHistoryConversation, toRequest, toSlice, toSubagent, toUsage, toWindow,
-  upsertConversation, upsertRequests, upsertSubagents, upsertWindow,
+  SCHEMA, selectConversation, selectHistory, selectPrompts, selectSlices, selectSubagents, selectWindows, selectWindowTotal,
+  toHistoryConversation, toPrompt, toRequest, toSlice, toSubagent, toUsage, toWindow,
+  upsertConversation, upsertPrompts, upsertRequests, upsertSubagents, upsertWindow,
 } from '../hooks/sql.ts'
 
 const dir = mkdtempSync(join(tmpdir(), 'cu-sql-'))
@@ -29,12 +29,13 @@ const conversation = {
   id: 'c1', project: '/work/app', title: "Fix the owner's bug", startedAt: 1500,
   requests: [request('1', 2000, 5), request('2', 3000, 7)],
   subagents: [{ agentId: 'a1', parentAgentId: null, name: 'Explore', toolUseId: 'toolu_1' }],
+  prompts: [{ at: 1900, text: "Fix the owner's bug" }],
 }
 
 try {
   run(SCHEMA)
   const save = (c: typeof conversation) =>
-    run(`BEGIN;\n${upsertConversation(c)}\n${upsertSubagents(c.id, c.subagents)}\n${upsertRequests(c.id, c.requests)}\nCOMMIT;`)
+    run(`BEGIN;\n${upsertConversation(c)}\n${upsertSubagents(c.id, c.subagents)}\n${upsertRequests(c.id, c.requests)}\n${upsertPrompts(c.id, c.prompts)}\nCOMMIT;`)
   save(conversation)
   // The first request again with a different output.
   save({ ...conversation, requests: [request('1', 2000, 50)], subagents: [] })
@@ -73,6 +74,7 @@ try {
   assert.deepEqual(requests[1]!.tools, ['Agent', "it's"])
   assert.equal(requests[1]!.agentId, 'a1')
   assert.equal(run(selectSubagents('c1')).map(toSubagent)[0]!.name, 'Explore')
+  assert.deepEqual(run(selectPrompts('c1')).map(toPrompt), conversation.prompts)
   assert.equal(run(selectConversation('missing')).length, 0)
 
   // A failing statement inside BEGIN ... COMMIT leaves no row behind.

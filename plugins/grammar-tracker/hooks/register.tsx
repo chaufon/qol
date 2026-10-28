@@ -312,6 +312,7 @@ export const register: Register = on => {
           {tabButton('top', 'Top mistakes')}
           <Button key="hide" plain onPress={() => closePane($)}>Hide</Button>
         </Box>
+        <Text dimColor>{'─'.repeat(width)}</Text>
         {current === 'top' ? (
           topMistakes === null ? (
             <Text dimColor>Loading…</Text>

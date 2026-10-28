@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Request } from '../types'
-import { quote, toRequest, toUsage, upsertConversation, upsertRequests } from './sql'
+import { quote, toPrompt, toRequest, toUsage, upsertConversation, upsertPrompts, upsertRequests } from './sql'
 
 const request = (model: string): Request => ({
   messageId: 'm1', requestId: 'r1', agentId: null, at: 1000, model, isFast: false,
@@ -40,7 +40,7 @@ test('no rows give no statement', () => {
 })
 
 test('the conversation upsert quotes its text', () => {
-  const sql = upsertConversation({ id: 'c1', project: "/a/it's", title: 't', startedAt: 5, requests: [], subagents: [] })
+  const sql = upsertConversation({ id: 'c1', project: "/a/it's", title: 't', startedAt: 5, requests: [], subagents: [], prompts: [] })
   expect(sql).toContain("'/a/it''s'")
 })
 
@@ -71,4 +71,12 @@ test('toRequest parses the JSON arrays', () => {
   expect(r.agentId).toBe(null)
   expect(r.tools).toEqual(['Read', 'Agent'])
   expect(r.toolUseIds).toEqual(['t1'])
+})
+
+test('prompts are stored by conversation and time, with their text quoted', () => {
+  const sql = upsertPrompts('c1', [{ at: 5, text: "it's done" }])
+  expect(sql).toContain("('c1', 5, 'it''s done')")
+  expect(sql).toContain('ON CONFLICT (conversation_id, at)')
+  expect(upsertPrompts('c1', [])).toBe('')
+  expect(toPrompt({ at: 5, text: 'x' })).toEqual({ at: 5, text: 'x' })
 })

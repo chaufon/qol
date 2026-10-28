@@ -14,12 +14,16 @@ The button opens a `Usage` pane. The pane is closed by default and never opens b
 
 ## Pane
 
-- **Conversation** tab: one row per request, with its number, its time, the tools it called, and its input, cache
-  write, cache read, output and total tokens. A subagent has a row of its own under the request that launched it,
-  with its totals and its request count (`▸ N`). A click on its name opens its requests. Under a rule, three totals
-  follow: the conversation, the current 5-hour window and the current 7-day window. A conversation with no requests
-  yet shows only these totals.
+- **Conversation** tab: one row per prompt, with its number, its time, its first line, the totals of every request
+  it started, and its request count (`▸ N`). A click on a prompt opens its requests; the last prompt is open until
+  it is clicked. A slash command counts as a prompt, and a prompt that made no request, such as `/clear`, has no
+  row. A request row holds its number, its time, the tools it called (`—` when it called none, as in a final
+  answer), and its input, cache write, cache read, output and total tokens. A subagent has a row of its own under
+  the request that launched it, with its totals and its request count. A click on its name opens its requests.
+  Under a rule, three totals follow: the conversation, the current 5-hour window and the current 7-day window. A
+  conversation with no requests yet shows only these totals.
 - **History** tab: every stored conversation, with its start time, title and totals, in cards that open and close.
+  A conversation opens to its prompts, as in the Conversation tab, all closed.
   A **card** groups the conversations of one project, or of one 5-hour window. Three groupings:
   - **Date**: day, then project card, then conversation.
   - **Project**: project card, then day, then conversation.

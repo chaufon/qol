@@ -1,4 +1,4 @@
-import type { Conversation, HistoryConversation, HistorySlice, Request, Subagent, Usage, Window, WindowKind } from '../types'
+import type { Conversation, HistoryConversation, HistorySlice, Prompt, Request, Subagent, Usage, Window, WindowKind } from '../types'
 import { costOf } from './prices'
 
 type Row = Record<string, unknown>
@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS requests (
   PRIMARY KEY (message_id, request_id));
 CREATE INDEX IF NOT EXISTS requests_at ON requests (at);
 CREATE INDEX IF NOT EXISTS requests_conversation ON requests (conversation_id);
+CREATE TABLE IF NOT EXISTS prompts (conversation_id TEXT NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (conversation_id, at));
 CREATE TABLE IF NOT EXISTS windows (kind TEXT NOT NULL, start INTEGER NOT NULL, "end" INTEGER NOT NULL, percent_used REAL NOT NULL, PRIMARY KEY (kind, start));
 `
 
@@ -78,6 +79,9 @@ export const upsertSubagents = (conversationId: string, ss: Subagent[]): string 
     ss.map((s) => [s.agentId, conversationId, s.parentAgentId, s.name, s.toolUseId]),
   )
 
+export const upsertPrompts = (conversationId: string, ps: Prompt[]): string =>
+  upsert('prompts', ['conversation_id', 'at', 'text'], ['conversation_id', 'at'], ps.map((p) => [conversationId, p.at, p.text]))
+
 export const upsertWindow = (w: Window): string =>
   upsert('windows', ['kind', 'start', '"end"', 'percent_used'], ['kind', 'start'], [[w.kind, w.start, w.end, w.percentUsed]])
 
@@ -117,6 +121,9 @@ WHERE c.id = ${quote(id)} ORDER BY r.at;`
 
 export const selectSubagents = (id: string): string =>
   `SELECT agent_id, parent_agent_id, name, tool_use_id FROM subagents WHERE conversation_id = ${quote(id)} ORDER BY rowid;`
+
+export const selectPrompts = (id: string): string =>
+  `SELECT at, text FROM prompts WHERE conversation_id = ${quote(id)} ORDER BY at;`
 
 const str = (v: unknown): string => String(v ?? '')
 const strOrNull = (v: unknown): string | null => (v === null || v === undefined ? null : String(v))
@@ -161,6 +168,8 @@ export const toRequest = (row: Row): Request => ({
   tools: list(row.tools),
   toolUseIds: list(row.tool_use_ids),
 })
+
+export const toPrompt = (row: Row): Prompt => ({ at: num(row.at), text: str(row.text) })
 
 export const toSubagent = (row: Row): Subagent => ({
   agentId: str(row.agent_id),

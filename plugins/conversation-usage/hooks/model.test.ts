@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Conversation, HistoryConversation, HistoryData, HistorySlice, Request, Subagent, Tokens, Usage } from '../types'
 import { projectColor } from './format'
 import { ZERO_TOKENS } from './prices'
-import { conversationRows, historyTree, sumUsage } from './model'
+import { conversationRows, historyTree, promptGroups, sumUsage } from './model'
 
 const tok = (output: number): Tokens => ({ ...ZERO_TOKENS, output })
 const req = (id: string, at: number, extra: Partial<Request> = {}): Request => ({
@@ -13,8 +13,8 @@ const req = (id: string, at: number, extra: Partial<Request> = {}): Request => (
 const sub = (agentId: string, toolUseId: string | null, parentAgentId: string | null = null): Subagent => ({
   agentId, parentAgentId, name: `agent ${agentId}`, toolUseId,
 })
-const conv = (requests: Request[], subagents: Subagent[]): Conversation => ({
-  id: 'c1', project: '/a/qol', title: 't', startedAt: 1, requests, subagents,
+const conv = (requests: Request[], subagents: Subagent[], prompts: Conversation['prompts'] = []): Conversation => ({
+  id: 'c1', project: '/a/qol', title: 't', startedAt: 1, requests, subagents, prompts,
 })
 const shape = (rows: ReturnType<typeof conversationRows>) =>
   rows.map((r) => (r.kind === 'request' ? `${r.number}@${r.depth}` : `${r.agentId}:${r.count}@${r.depth}`))
@@ -177,4 +177,50 @@ test('by window: a week counts requests inside the 7-day window but outside ever
   const week = historyTree(h, 'window', NOW, {})[0]!
   expect(week.usage.tokens.output).toBe(50)
   expect(week.count).toBe(1)
+})
+
+const prompted = (): Conversation => ({
+  ...base(),
+  requests: [...base().requests, req('3', 30), req('d1', 31, { agentId: 'D' })],
+  subagents: [...base().subagents, sub('D', 'unknown')],
+  prompts: [{ at: 5, text: 'Fix the bug' }, { at: 25, text: 'Add a test' }],
+})
+
+test('without prompts there are no prompt groups', () => {
+  expect(promptGroups(base(), () => undefined, '', undefined, true)).toBe(null)
+})
+
+test('each prompt groups its requests and the subagents they launched', () => {
+  const groups = promptGroups(prompted(), () => undefined, '', undefined, false)!
+  expect(groups.map((g) => [g.key, g.number, g.text, g.count])).toEqual([
+    ['prompt:1', 1, 'Fix the bug', 6],
+    ['prompt:2', 2, 'Add a test', 2],
+  ])
+  expect(shape(groups[0]!.rows)).toEqual(['1@0', 'A:2@0', 'B:1@0', '2@0'])
+  expect(shape(groups[1]!.rows)).toEqual(['1@0', 'D:1@0'])
+  expect(groups[0]!.usage.tokens.output).toBe(6000)
+  expect(groups.map((g) => g.isOpen)).toEqual([false, false])
+})
+
+test('the last prompt is open until it is toggled', () => {
+  const open = promptGroups(prompted(), () => undefined, '', undefined, true)!
+  expect(open.map((g) => g.isOpen)).toEqual([false, true])
+  const closed = promptGroups(prompted(), (k) => (k === 'p/prompt:2' ? false : undefined), 'p/', undefined, true)!
+  expect(closed.map((g) => [g.key, g.isOpen])).toEqual([['p/prompt:1', false], ['p/prompt:2', false]])
+})
+
+test('requests before the first prompt form group 0, and a range drops empty groups', () => {
+  const c = conv([req('0', 1), req('1', 10), req('2', 30)], [], [{ at: 5, text: 'a' }, { at: 25, text: 'b' }])
+  const all = promptGroups(c, () => undefined, '', undefined, false)!
+  expect(all.map((g) => [g.number, g.at, g.text, g.count])).toEqual([
+    [0, null, 'Before the first prompt', 1], [1, 5, 'a', 1], [2, 25, 'b', 1],
+  ])
+  const ranged = promptGroups(c, () => undefined, '', [20, 40], false)!
+  expect(ranged.map((g) => g.number)).toEqual([2])
+})
+
+test('a prompt without requests has no group and no number', () => {
+  const c = conv([req('1', 10), req('2', 30)], [], [{ at: 5, text: '/clear' }, { at: 8, text: 'a' }, { at: 25, text: 'b' }])
+  const groups = promptGroups(c, () => undefined, '', undefined, false)!
+  expect(groups.map((g) => [g.key, g.number, g.text])).toEqual([['prompt:2', 1, 'a'], ['prompt:3', 2, 'b']])
 })

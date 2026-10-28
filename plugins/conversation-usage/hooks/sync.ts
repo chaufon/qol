@@ -1,7 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { Conversation, Request, Subagent } from '../types'
-import { completeLines, cwdOf, feed, newTranscript, requestsOf, startedOf, titleOf, utf8Length } from './transcript'
+import { completeLines, cwdOf, feed, newTranscript, promptsOf, requestsOf, startedOf, titleOf, utf8Length } from './transcript'
 import type { TranscriptState } from './transcript'
 
 type Cursor = { offset: number; state: TranscriptState }
@@ -144,5 +144,6 @@ export async function readConversation(
     startedAt: startedOf(state) ?? requests[0]?.at ?? 0,
     requests,
     subagents,
+    prompts: promptsOf(state),
   }
 }

@@ -1,6 +1,7 @@
-import type { Request, Tokens } from '../types'
+import type { Prompt, Request, Tokens } from '../types'
 
 const TITLE_LENGTH = 100
+const PROMPT_LENGTH = 200
 
 type Json = Record<string, any>
 
@@ -10,6 +11,7 @@ export type TranscriptState = {
   customTitle: string | null
   aiTitle: string | null
   firstPrompt: string | null
+  prompts: Prompt[]
   cwd: string | null
   startedAt: number | null
 }
@@ -20,6 +22,7 @@ export const newTranscript = (agentId: string | null): TranscriptState => ({
   customTitle: null,
   aiTitle: null,
   firstPrompt: null,
+  prompts: [],
   cwd: null,
   startedAt: null,
 })
@@ -38,18 +41,37 @@ const tokensOf = (usage: Json): Tokens => {
   }
 }
 
-const promptOf = (line: Json): string | null => {
-  if (line.isMeta === true) return null
+const textOf = (line: Json): string | null => {
+  if (line.isMeta === true || line.isCompactSummary === true) return null
   const content = line.message?.content
-  let text: string | null = null
-  if (typeof content === 'string') text = content
-  else if (Array.isArray(content)) {
-    const block = content.find((b: Json) => b?.type === 'text' && typeof b.text === 'string')
-    text = block ? block.text : null
-  }
-  if (text === null || text.trim() === '' || text.trimStart().startsWith('<')) return null
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return null
+  const block = content.find((b: Json) => b?.type === 'text' && typeof b.text === 'string')
+  return block ? block.text : null
+}
+
+// The text the person typed; null for meta, command, tool result and interruption lines.
+const promptOf = (line: Json): string | null => {
+  const text = textOf(line)
+  if (text === null || text.trim() === '') return null
+  const start = text.trimStart()
+  if (start.startsWith('<') || start.startsWith('[Request interrupted')) return null
   return text
 }
+
+const COMMAND = /^\s*<command-name>([^<]*)<\/command-name>/
+const ARGS = /<command-args>([^<]*)<\/command-args>/
+
+// A slash command as typed, `/name args`; null for any other line.
+const commandOf = (line: Json): string | null => {
+  const text = textOf(line)
+  const name = text === null ? undefined : COMMAND.exec(text)?.[1]?.trim()
+  if (!name) return null
+  const args = ARGS.exec(text!)?.[1]?.trim()
+  return args ? `${name} ${args}` : name
+}
+
+const firstLine = (text: string, length: number): string => (text.trim().split('\n')[0] ?? '').slice(0, length)
 
 const addRequest = (state: TranscriptState, line: Json, at: number): void => {
   const message = line.message
@@ -104,14 +126,20 @@ export const feed = (state: TranscriptState, lines: string[]): void => {
     if (line.type === 'assistant') addRequest(state, line, Number.isFinite(at) ? at : 0)
     else if (line.type === 'custom-title' && typeof line.customTitle === 'string') state.customTitle = line.customTitle
     else if (line.type === 'ai-title' && typeof line.aiTitle === 'string') state.aiTitle = line.aiTitle
-    else if (line.type === 'user' && state.firstPrompt === null) {
+    else if (line.type === 'user') {
       const text = promptOf(line)
-      if (text !== null) state.firstPrompt = (text.trim().split('\n')[0] ?? '').slice(0, TITLE_LENGTH)
+      if (text !== null && state.firstPrompt === null) state.firstPrompt = firstLine(text, TITLE_LENGTH)
+      const typed = text ?? commandOf(line)
+      if (typed !== null && state.agentId === null && Number.isFinite(at)) {
+        state.prompts.push({ at, text: firstLine(typed, PROMPT_LENGTH) })
+      }
     }
   }
 }
 
 export const requestsOf = (state: TranscriptState): Request[] => [...state.requests.values()]
+
+export const promptsOf = (state: TranscriptState): Prompt[] => [...state.prompts]
 
 export const titleOf = (state: TranscriptState): string | null => state.customTitle ?? state.aiTitle ?? state.firstPrompt
 

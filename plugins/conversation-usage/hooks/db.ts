@@ -3,9 +3,9 @@ import type { EngineInterface } from 'claude-code'
 import type { Conversation, HistoryData, Usage, Window } from '../types'
 import { configDir } from './sync'
 import {
-  SCHEMA, selectConversation, selectHistory, selectSlices, selectSubagents, selectWindows, selectWindowTotal,
-  toHistoryConversation, toRequest, toSlice, toSubagent, toUsage, toWindow,
-  upsertConversation, upsertRequests, upsertSubagents, upsertWindow,
+  SCHEMA, selectConversation, selectHistory, selectPrompts, selectSlices, selectSubagents, selectWindows, selectWindowTotal,
+  toHistoryConversation, toPrompt, toRequest, toSlice, toSubagent, toUsage, toWindow,
+  upsertConversation, upsertPrompts, upsertRequests, upsertSubagents, upsertWindow,
 } from './sql'
 
 export type Db = { path: string }
@@ -57,7 +57,9 @@ export async function query<T>($: EngineInterface, db: Db, sql: string, map: (ro
 }
 
 export async function saveConversation($: EngineInterface, db: Db, c: Conversation): Promise<void> {
-  const statements = [upsertConversation(c), upsertSubagents(c.id, c.subagents), upsertRequests(c.id, c.requests)]
+  const statements = [
+    upsertConversation(c), upsertSubagents(c.id, c.subagents), upsertRequests(c.id, c.requests), upsertPrompts(c.id, c.prompts),
+  ]
   await exec($, db, `BEGIN;\n${statements.filter((s) => s !== '').join('\n')}\nCOMMIT;`)
 }
 
@@ -87,7 +89,10 @@ export async function loadConversation($: EngineInterface, db: Db, id: string): 
   const rows = await query($, db, selectConversation(id), (row) => row)
   const first = rows[0]
   if (first === undefined) return null
-  const subagents = await query($, db, selectSubagents(id), toSubagent)
+  const [subagents, prompts] = await Promise.all([
+    query($, db, selectSubagents(id), toSubagent),
+    query($, db, selectPrompts(id), toPrompt),
+  ])
   return {
     id,
     project: String(first.project),
@@ -95,5 +100,6 @@ export async function loadConversation($: EngineInterface, db: Db, id: string): 
     startedAt: Number(first.started_at),
     requests: rows.filter((row) => row.message_id !== null && row.message_id !== undefined).map(toRequest),
     subagents,
+    prompts,
   }
 }

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { completeLines, cwdOf, feed, newTranscript, requestsOf, startedOf, titleOf, utf8Length } from './transcript'
+import { completeLines, cwdOf, feed, newTranscript, promptsOf, requestsOf, startedOf, titleOf, utf8Length } from './transcript'
 
 type Opts = {
   id?: string
@@ -153,4 +153,32 @@ test('completeLines keeps the partial last line as rest', () => {
 test('utf8Length counts bytes', () => {
   expect(utf8Length('é€😀')).toBe(9)
   expect(utf8Length('abc')).toBe(3)
+})
+
+const user = (content: unknown, extra: Record<string, unknown> = {}, at = '2026-10-28T10:00:00.000Z') =>
+  lineOf({ type: 'user', timestamp: at, message: { role: 'user', content }, ...extra })
+
+test('prompts and slash commands of the main transcript are kept with their time', () => {
+  const state = newTranscript(null)
+  feed(state, [
+    user('Fix the bug\nin the parser'),
+    user('Base directory for this skill', { isMeta: true }),
+    user([{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }]),
+    user([{ type: 'text', text: '[Request interrupted by user]' }]),
+    user('<local-command-caveat>x</local-command-caveat>', { isMeta: true }),
+    user('<command-name>/code-review</command-name>\n<command-message>code-review</command-message>\n<command-args>high</command-args>', {}, '2026-10-28T10:05:00.000Z'),
+    user('<command-name>/clear</command-name>\n<command-args></command-args>'),
+    user('Summary of the conversation', { isCompactSummary: true }),
+  ])
+  expect(promptsOf(state)).toEqual([
+    { at: Date.parse('2026-10-28T10:00:00.000Z'), text: 'Fix the bug' },
+    { at: Date.parse('2026-10-28T10:05:00.000Z'), text: '/code-review high' },
+    { at: Date.parse('2026-10-28T10:00:00.000Z'), text: '/clear' },
+  ])
+})
+
+test('a subagent transcript keeps no prompts', () => {
+  const state = newTranscript('A')
+  feed(state, [user('Explore the code')])
+  expect(promptsOf(state)).toEqual([])
 })
