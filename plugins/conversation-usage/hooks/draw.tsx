@@ -1,9 +1,13 @@
 import type { Elements } from 'claude-code'
 
-import type { Conversation, Grouping, History, Tab, Tokens, Usage, View, WindowTotal } from '../types'
-import { COLORS, fmtCost, fmtTokens, hhmm, weekday } from './format'
+import type { Conversation, Costs, Grouping, History, Request, Tab, Tokens, Usage, View, WindowTotal } from '../types'
+import { COLORS, fmtCost, fmtPrice, fmtTokens, hhmm, weekday } from './format'
 import { conversationRows, historyTree, sumUsage } from './model'
 import type { Node, Row } from './model'
+import {
+  CACHE_WRITE_1H, CACHE_WRITE_5M, FAST_FACTOR, FAST_MODELS, LONG_CONTEXT_FACTOR, LONG_CONTEXT_MODEL,
+  LONG_CONTEXT_TOKENS, PRICES, ZERO_TOKENS,
+} from './prices'
 
 export type Actions = {
   toggle(key: string, isOpen: boolean): void
@@ -34,6 +38,7 @@ const WHITE = '#ffffff'
 const NUM = 3
 const TIME = 6
 const COL = 8
+const PRICE_COL = 10
 const MARK = 5
 const FIGURES = 5 * COL
 const CHART_TOOLS = 12
@@ -63,6 +68,8 @@ export const barSegments = (tokens: Tokens, scale: number, width: number): [numb
   }
   return cells as [number, number, number, number]
 }
+
+const ZERO_COSTS: Costs = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, total: 0 }
 
 const toolsText = (tools: string[]): string => (tools.length ? tools.join(', ') : '—')
 const marker = (isOpen: boolean, n: number): string => cell(`${isOpen ? '▾' : '▸'} ${n}`, MARK)
@@ -163,20 +170,20 @@ function conversationView(c: Ctx, rows: Row[], lead: string | null): El[] {
   })
 }
 
-function headerLine(c: Ctx): El {
+// The column names over the rows. `head(w)` names the leading columns in exactly w cells.
+function headerLine(c: Ctx, head: (w: number) => string): El {
   const { Text } = c.ui
   const labelW = c.width - FIGURES - MARK
   if (c.view === 'chart') {
-    const barW = Math.max(6, c.width - NUM - TIME - CHART_TOOLS - 2 * COL - MARK - 1)
-    return (
-      <Text dimColor>
-        {`${cell('#', NUM)}${cell('time', TIME)}${cell('tools', CHART_TOOLS)}${cell('bar', barW + 1)}${rcell('tokens', COL)}${rcell('cost', COL)}`}
-      </Text>
-    )
+    const headW = NUM + TIME + CHART_TOOLS
+    const barW = Math.max(6, c.width - headW - 2 * COL - MARK - 1)
+    return <Text dimColor>{`${head(headW)}${cell('bar', barW + 1)}${rcell('tokens', COL)}${rcell('cost', COL)}`}</Text>
   }
   const names = ['input', 'c.write', 'c.read', 'output', 'total'].map((n) => rcell(n, COL)).join('')
-  return <Text dimColor>{`${cell('#', NUM)}${cell('time', TIME)}${cell('tools', labelW - NUM - TIME)}${names}`}</Text>
+  return <Text dimColor>{`${head(labelW)}${names}`}</Text>
 }
+
+const requestHead = (w: number): string => `${cell('#', NUM)}${cell('time', TIME)}${cell('tools', w - NUM - TIME)}`
 
 function legend(c: Ctx): El {
   const { Text } = c.ui
@@ -191,7 +198,7 @@ function legend(c: Ctx): El {
 // The largest request total fills the bar.
 const scaleOf = (rows: Row[]): number => Math.max(1, ...rows.filter((r) => r.kind === 'request').map((r) => total(r.usage.tokens)))
 
-function totalsView(c: Ctx, current: Conversation, windowTotals: WindowTotal[]): El[] {
+function totalsView(c: Ctx, requests: Request[], windowTotals: WindowTotal[]): El[] {
   const { Box, Text } = c.ui
   const out: El[] = [<Text dimColor>{'─'.repeat(c.width)}</Text>]
   const one = (key: string, usage: Usage, head: (w: number) => El[], background?: string) => {
@@ -202,7 +209,8 @@ function totalsView(c: Ctx, current: Conversation, windowTotals: WindowTotal[]):
       </Box>,
     )
   }
-  one('conversation', sumUsage(current.requests), (w) => [<Text bold color={WHITE}>{cell('Conversation', w)}</Text>], BAND)
+  const usage = requests.length === 0 ? { tokens: ZERO_TOKENS, cost: ZERO_COSTS } : sumUsage(requests)
+  one('conversation', usage, (w) => [<Text bold color={WHITE}>{cell('Conversation', w)}</Text>], BAND)
   for (const t of windowTotals) {
     const label = t.window.kind === 'five_hour'
       ? `5-hour window (${hhmm(t.window.end)})`
@@ -213,16 +221,14 @@ function totalsView(c: Ctx, current: Conversation, windowTotals: WindowTotal[]):
 }
 
 function conversationTab(c: Ctx, p: PaneProps): El[] {
-  const { Text } = c.ui
   const current = p.current
-  if (current === null || current.requests.length === 0) return [<Text dimColor>No requests yet in this conversation.</Text>]
-  const rows = conversationRows(current, (k) => p.expanded[k] ?? false, '')
+  const rows = current === null ? [] : conversationRows(current, (k) => p.expanded[k] ?? false, '')
   const sized = { ...c, scale: scaleOf(rows) }
   return [
     ...(c.view === 'chart' ? [legend(c)] : []),
-    headerLine(c),
+    headerLine(c, requestHead),
     ...conversationView(sized, rows, null),
-    ...totalsView(c, current, p.windowTotals),
+    ...totalsView(c, current?.requests ?? [], p.windowTotals),
   ]
 }
 
@@ -306,7 +312,37 @@ function historyTab(c: Ctx, p: PaneProps): El[] {
   if ('error' in data) return [<Text color="error">{data.error}</Text>]
   if (data.conversations.length === 0) return [<Text dimColor>No stored conversations yet.</Text>]
   const nodes = historyTree(data, p.grouping, p.now, p.expanded)
-  return [...(c.view === 'chart' ? [legend(c)] : []), ...nodes.map((n, i) => nodeView(c, n, p, i))]
+  return [
+    ...(c.view === 'chart' ? [legend(c)] : []),
+    headerLine(c, (w) => ' '.repeat(w)),
+    ...nodes.map((n, i) => nodeView(c, n, p, i)),
+  ]
+}
+
+// One row per model, in USD per million tokens, then the factors some requests are charged.
+function pricesTab(c: Ctx): El[] {
+  const { Box, Text } = c.ui
+  const modelW = c.width - 5 * PRICE_COL
+  const names = ['input', 'write 5m', 'write 1h', 'read', 'output'].map((n) => rcell(n, PRICE_COL)).join('')
+  const rows = Object.entries(PRICES).map(([model, p], i) => (
+    <Box key={`price:${model}`} backgroundColor={i % 2 === 1 ? STRIPE : undefined}>
+      <Text color={WHITE}>{cell(model, modelW)}</Text>
+      {[p.input, p.input * CACHE_WRITE_5M, p.input * CACHE_WRITE_1H, p.cacheRead, p.output].map((v) => (
+        <Text color={COLORS.cost}>{rcell(fmtPrice(v), PRICE_COL)}</Text>
+      ))}
+    </Box>
+  ))
+  return [
+    <Text dimColor>{`${cell('USD per million tokens', modelW)}${names}`}</Text>,
+    ...rows,
+    <Text dimColor>{'─'.repeat(c.width)}</Text>,
+    <Text dimColor wrap="wrap">{`A cache write costs ${CACHE_WRITE_5M} x input for 5 minutes, ${CACHE_WRITE_1H} x input for 1 hour.`}</Text>,
+    <Text dimColor wrap="wrap">{`Fast mode on ${FAST_MODELS.join(' and ')}: every price x ${FAST_FACTOR}.`}</Text>,
+    <Text dimColor wrap="wrap">
+      {`${LONG_CONTEXT_MODEL} with more than ${LONG_CONTEXT_TOKENS.toLocaleString('en-US')} input tokens in one request: every price x ${LONG_CONTEXT_FACTOR}.`}
+    </Text>,
+    <Text dimColor wrap="wrap">A model missing from this table has no cost, shown as ?.</Text>,
+  ]
 }
 
 // A row of switch choices: the current one is bold and inverse; `key` presses the next one.
@@ -329,21 +365,23 @@ function switchView<T extends string>(
 export function drawPane(ui: Ui, p: PaneProps, actions: Actions): El {
   const { Box, Button, Text } = ui
   const c: Ctx = { ui, view: p.view, width: p.width, isFullscreen: p.isFullscreen, scale: 1, actions }
-  const tabs: [Tab, string][] = [['conversation', 'Conversation'], ['history', 'History']]
+  const tabs: [Tab, string][] = [['conversation', 'Conversation'], ['history', 'History'], ['prices', 'Prices']]
   return (
     <Box flexDirection="column" width={p.width}>
       <Box gap={2}>
         {switchView(c, 'tab', 't', tabs, p.tab, actions.selectTab, actions.nextTab)}
         <Button key="hide" plain onPress={actions.hide}>Hide</Button>
       </Box>
-      <Box gap={2}>
-        {switchView(c, 'view', 'v', VIEWS, p.view, actions.selectView, actions.nextView)}
-        {p.tab === 'history'
-          ? switchView(c, 'group', 'g', GROUPINGS, p.grouping, actions.selectGrouping, actions.nextGrouping)
-          : null}
-      </Box>
+      {p.tab === 'prices' ? null : (
+        <Box gap={2}>
+          {switchView(c, 'view', 'v', VIEWS, p.view, actions.selectView, actions.nextView)}
+          {p.tab === 'history'
+            ? switchView(c, 'group', 'g', GROUPINGS, p.grouping, actions.selectGrouping, actions.nextGrouping)
+            : null}
+        </Box>
+      )}
       {p.notice === null ? null : <Text dimColor>{p.notice}</Text>}
-      {p.tab === 'conversation' ? conversationTab(c, p) : historyTab(c, p)}
+      {p.tab === 'conversation' ? conversationTab(c, p) : p.tab === 'history' ? historyTab(c, p) : pricesTab(c)}
     </Box>
   )
 }

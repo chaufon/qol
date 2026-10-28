@@ -17,14 +17,18 @@ The button opens a `Usage` pane. The pane is closed by default and never opens b
 - **Conversation** tab: one row per request, with its number, its time, the tools it called, and its input, cache
   write, cache read, output and total tokens. A subagent has a row of its own under the request that launched it,
   with its totals and its request count (`▸ N`). A click on its name opens its requests. Under a rule, three totals
-  follow: the conversation, the current 5-hour window and the current 7-day window.
+  follow: the conversation, the current 5-hour window and the current 7-day window. A conversation with no requests
+  yet shows only these totals.
 - **History** tab: every stored conversation, with its start time, title and totals, in cards that open and close.
   A **card** groups the conversations of one project, or of one 5-hour window. Three groupings:
   - **Date**: day, then project card, then conversation.
   - **Project**: project card, then day, then conversation.
   - **Window**: 7-day window, then 5-hour window card, then conversation. A conversation that spans two windows
     appears in both, and each copy counts only the requests made inside that window.
-- Four views show the same rows: **Tokens**, **Cost** (estimated cost per token type), **Both**, and **Chart** (one
+- **Prices** tab: the price of each model in USD per million tokens, for input, a 5-minute cache write, a 1-hour
+  cache write, a cache read and output, and the factors for fast mode and long context. The cost of a request is
+  its tokens of each type times these prices. A model missing from the table has no cost, shown as `?`.
+- Four views show the same rows in the Conversation and History tabs: **Tokens**, **Cost** (estimated cost per token type), **Both**, and **Chart** (one
   bar per request, split by token type).
 
 A conversation's title is its last `/rename` title, else its generated title, else the start of its first prompt. Its
@@ -36,7 +40,7 @@ project is the last segment of the working directory it started in.
 | --- | --- | --- |
 | `u` | Open or close the pane | the band above the prompt |
 | `t` | Switch tab | the pane |
-| `v` | Next view | the pane |
+| `v` | Next view | the Conversation and History tabs |
 | `g` | Next grouping | the History tab |
 | Enter or click | Open or close the focused row or card | the pane |
 | Esc | Close the pane | the pane |
