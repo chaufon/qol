@@ -7,3 +7,4 @@ plugins/*/.claude-plugin/types/
 /AGENTS.local.md
 __pycache__/
 .pytest_cache/
+/.playwright-mcp/
