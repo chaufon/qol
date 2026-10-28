@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { bandLine, bar, cell, stripCheck, toCheck } from './register'
+import { bandLine, bar, cell, mistakeColumn, stripCheck, toCheck } from './register'
 
 
 const STOP_OUTPUT = {
@@ -292,4 +292,12 @@ test('without Python 3 the stop hook says so in a toast, and a Python installed 
   calls.pythons = { python: '3' }
   await $.turn.complete(TURN)
   expect(calls.runs[0]?.[0]).toBe('python')
+})
+
+test('a Top mistakes row with the largest count and the recurring mark fits the pane', () => {
+  for (const largest of [7, 68, 512, 4096]) {
+    const mistake = cell('the', mistakeColumn(80, largest))
+    const row = `▸ ${cell('1', 3)}${cell('Article', 15)} ${mistake} ${bar(largest, largest)} ${largest} ⟳`
+    expect(row.length).toBe(80)
+  }
 })

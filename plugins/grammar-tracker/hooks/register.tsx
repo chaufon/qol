@@ -17,6 +17,7 @@ const NO_CHECK_LINE = 'Grammar: no check for the last prompt'
 const BLOCK = /```grammar-json\s*\n[\s\S]*?\n\s*```\s*/
 const BLOCK_OPEN = '```grammar-json'
 const BAR_WIDTH = 8
+const TYPE_WIDTH = 15
 
 const last = atom({ plugin: 'grammar-tracker', key: 'last' } as const, null)
 const isOpen = atom({ plugin: 'grammar-tracker', key: 'isOpen' } as const, false)
@@ -104,6 +105,14 @@ export function cell(text: string, width: number): string {
 // A bar of up to BAR_WIDTH blocks, as long against the largest count as the count is.
 export function bar(count: number, largest: number): string {
   return '█'.repeat(Math.max(1, Math.round((count / largest) * BAR_WIDTH)))
+}
+
+// The width of the Mistake column in a Top mistakes row, so the row fits the pane on one line. The row holds the
+// arrow and "# ", the rank, the type, the mistake and the count column: the bar, the largest count and the recurring
+// mark ("████ 68 ⟳").
+export function mistakeColumn(paneWidth: number, largest: number): number {
+  const countWidth = BAR_WIDTH + 1 + String(largest).length + 2
+  return Math.max(8, paneWidth - 2 - 3 - TYPE_WIDTH - 1 - 1 - countWidth)
 }
 
 // The Python command found, kept while the module is loaded. A failed search is not kept, so a Python installed later
@@ -261,18 +270,17 @@ export const register: Register = on => {
       if (mistakes.length === 0) return <Text dimColor>No mistakes logged yet</Text>
       const open = await read($, openRow)
       const largest = Math.max(...mistakes.map(o => o.count))
-      const typeWidth = 15
-      const mistakeWidth = Math.max(8, width - 2 - 3 - typeWidth - (BAR_WIDTH + 4) - 2)
+      const mistakeWidth = mistakeColumn(width, largest)
       const cardWidth = width - 2
       return (
         <Box flexDirection="column">
-          <Text dimColor>{`  ${cell('#', 3)}${cell('Type', typeWidth)} ${cell('Mistake', mistakeWidth)} Count`}</Text>
+          <Text dimColor>{`  ${cell('#', 3)}${cell('Type', TYPE_WIDTH)} ${cell('Mistake', mistakeWidth)} Count`}</Text>
           {mistakes.map((o, n) => {
             const id = `${o.type}:${o.identifier}`
             const isOpen = open === id
             const row = (
               <Button key={`row-${n}`} plain onPress={() => update($, openRow, () => (isOpen ? null : id))}>
-                {`${isOpen ? '▾' : '▸'} ${cell(String(n + 1), 3)}${cell(capitalize(o.typeLabel), typeWidth)} `}
+                {`${isOpen ? '▾' : '▸'} ${cell(String(n + 1), 3)}${cell(capitalize(o.typeLabel), TYPE_WIDTH)} `}
                 {`${cell(o.identifier, mistakeWidth)} `}
                 <Text color={o.isRecurring ? 'warning' : 'suggestion'}>{bar(o.count, largest)}</Text>
                 {` ${o.count}${o.isRecurring ? ' ⟳' : ''}`}
