@@ -53,6 +53,10 @@ function engine(on: On, stdout: string) {
   })
   on('ui.open', ($, e) => { calls.opened.push(e.id); return { value: { isPlaced: true } } })
   on('ui.close', ($, e) => { calls.closed.push(e.id); return { value: undefined } })
+  on('ui.panes', () => {
+    const up = calls.opened.length > calls.closed.length
+    return { value: up ? [{ id: 'grammar', title: '✎ Grammar', isShown: true, isFocused: false, isPlaced: true }] : [] }
+  })
   on('ui.toast', ($, e) => { calls.toasts.push(e.text); return { value: undefined } })
   on('session.id', () => ({ value: 's1' }))
   on('session.cwd', () => ({ value: '/proj' }))
@@ -255,6 +259,16 @@ test('a Top mistakes row opens and closes its example card', async ($, on) => {
   expect(await pane.find({ text: '✗ a' })).toBeUndefined()
   await $.ui.press({ plugin: 'grammar-tracker', key: 'row-1' })
   expect(await pane.find({ text: '✗ c' })).toBeUndefined()
+})
+
+test('after a /clear the band offers to hide the pane still up, and its Top mistakes tab loads', async ($, on) => {
+  const calls = engine(on, '')
+  calls.opened.push('grammar')
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ text: 'Hide' })).toBeDefined()
+  const pane = await $.ui.mount(PANE)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
+  expect(await pane.find({ text: /Malformed tense/ })).toBeDefined()
 })
 
 test('the Top mistakes tab says when nothing is logged', async ($, on) => {

@@ -111,7 +111,7 @@ The `mistake_types` table in the database holds the types of mistake. Its column
   green (`✓`), Claude's reason, and the type's description and example, dimmed. Recurring mistakes have a yellow
   border and `⟳`. The corrected prompt is in its own card at the end.
 - **Top mistakes** tab: a table of the 10 most frequent mistakes with rank, type, identifier and a bar with the
-  counter. A click on a row opens a card under it, and a second click closes it; one row is open at a time. The card's
+  counter, read again each time the tab is shown. A click on a row opens a card under it, and a second click closes it; one row is open at a time. The card's
   border shows the type's description (cut with `…` when the border is too short, and then repeated in full inside).
   Inside are the type's example and the most recent original sentence, corrected sentence and reason.
 - Failures go to `errors.log` next to the database and never block Claude Code. A failure of the stop hook or of the

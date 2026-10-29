@@ -161,10 +161,30 @@ async function refreshTop($: EngineInterface) {
   }
 }
 
+// The load of the top mistakes in flight, so a pane drawn again while query.py runs does not start another.
+let loadingTop: Promise<void> | undefined
+
+function loadTop($: EngineInterface): Promise<void> {
+  loadingTop ??= refreshTop($).finally(() => {
+    loadingTop = undefined
+  })
+  return loadingTop
+}
+
+// Whether the pane is up, by the engine's record: a /clear resets the mod's state while the pane stays up.
+async function isPaneUp($: EngineInterface): Promise<boolean> {
+  return (await $.ui.panes()).some(pane => pane.id === PANE)
+}
+
+async function showTab($: EngineInterface, id: PaneTab) {
+  await update($, tab, () => id)
+  if (id === 'top') await loadTop($)
+}
+
 async function openPane($: EngineInterface) {
   await update($, isOpen, () => true)
   await $.ui.open({ id: PANE, title: '✎ Grammar', focus: true, closeOnEscape: true })
-  await refreshTop($)
+  await loadTop($)
 }
 
 async function closePane($: EngineInterface) {
@@ -190,7 +210,7 @@ export const register: Register = on => {
       const check = toCheck(output)
       await update($, last, () => check)
       if (!check && output.systemMessage) $.ui.toast(output.systemMessage)
-      if (await read($, isOpen)) await refreshTop($)
+      if (await isPaneUp($)) await refreshTop($)
     } catch (error) {
       await update($, last, () => null)
       $.ui.toast(`Grammar tracker: failed to read the check (${String(error)})`)
@@ -208,7 +228,8 @@ export const register: Register = on => {
     const check = await read($, last)
     if (e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    const shown = await read($, isOpen)
+    // isOpen redraws the band when the pane opens or closes.
+    const shown = (await read($, isOpen)) || (await isPaneUp($))
     return (
       <Box flexDirection="column">
         {await next(e)}
@@ -228,7 +249,7 @@ export const register: Register = on => {
     const check = await read($, last)
     const current: PaneTab = await read($, tab)
     const tabButton = (id: PaneTab, label: string) => (
-      <Button key={`tab-${id}`} plain onPress={() => update($, tab, () => id)}>
+      <Button key={`tab-${id}`} plain onPress={() => showTab($, id)}>
         {current === id
           ? <Text bold color="inverseText" backgroundColor={ACCENT}>{` ${label} `}</Text>
           : <Text dimColor>{` ${label} `}</Text>}
@@ -237,7 +258,7 @@ export const register: Register = on => {
     // The keys, on the last row the pane shows: the pane has no footer of its own, so the row moves with the scroll.
     const { offset, bodyRows } = e.props.scroll
     const keys: [string, string, string, () => void][] = [
-      ['tab-next', 't', 'Tab', () => void update($, tab, t => (t === 'last' ? 'top' : 'last'))],
+      ['tab-next', 't', 'Tab', () => void showTab($, current === 'last' ? 'top' : 'last')],
       ['hide', 'h', 'Hide', () => void closePane($)],
     ]
     const used = keys.reduce((n, [, hotkey, label]) => n + hotkey.length + label.length + 4, 0)
