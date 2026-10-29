@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { bandLine, bar, cell, mistakeColumn, stripCheck, toCheck } from './register'
+import { bandLine, cell, countColumn, mistakeColumn, stripCheck, toCheck } from './register'
 
 
 const STOP_OUTPUT = {
@@ -280,11 +280,11 @@ test('the Top mistakes tab says when nothing is logged', async ($, on) => {
   expect(await pane.find({ text: 'No mistakes logged yet' })).toBeDefined()
 })
 
-test('cell cuts or pads a table cell and bar scales to the largest count', () => {
+test('cell cuts or pads a table cell and the Count column fits its header and the largest count', () => {
   expect(cell('article', 4)).toBe('art…')
   expect(cell('the', 5)).toBe('the  ')
-  expect(bar(7, 7)).toBe('████████')
-  expect(bar(1, 7)).toBe('█')
+  expect(countColumn(68)).toBe(5)
+  expect(countColumn(123456)).toBe(6)
 })
 
 test('the scripts run with py -3 where python3 does not start, as on Windows', async ($, on) => {
@@ -308,12 +308,31 @@ test('without Python 3 the stop hook says so in a toast, and a Python installed 
   expect(calls.runs[0]?.[0]).toBe('python')
 })
 
-test('a Top mistakes row with the largest count and the recurring mark fits the pane', () => {
-  for (const largest of [7, 68, 512, 4096]) {
+test('a Top mistakes row with the largest count fits the pane', () => {
+  for (const largest of [7, 68, 512, 123456]) {
     const mistake = cell('the', mistakeColumn(80, largest))
-    const row = `▸ ${cell('1', 3)}${cell('Article', 15)} ${mistake} ${bar(largest, largest)} ${largest} ⟳`
+    const row = `▾${'10'.padStart(3)} ${cell('Article', 15)}  ${mistake}${String(largest).padStart(countColumn(largest))}`
     expect(row.length).toBe(80)
   }
+})
+
+test('the Top mistakes tab ends with the recurring mistakes and the sum of the counts', async ($, on) => {
+  engine(on, '')
+  await pressBand($)
+  const pane = await $.ui.mount(PANE)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
+  expect(await pane.find({ text: '1 recurring · 4 mistakes in the top 2' })).toBeDefined()
+  const counts = (await pane.findAll({ type: 'Text' })).filter(t => t.props.color === 'warning' || t.props.color === 'success')
+  expect(counts.map(t => [t.text.trim(), t.props.color])).toEqual([['1', 'success'], ['3', 'warning']])
+})
+
+test('the footer keys sit on the last row the pane shows, under a line', async ($, on) => {
+  engine(on, JSON.stringify(STOP_OUTPUT))
+  await $.turn.complete(TURN)
+  const pane = await $.ui.mount(PANE)
+  const footer = (await pane.findAll({ type: 'Box' })).find(b => b.props.position === 'absolute' && b.text.includes('Hide'))
+  expect(footer?.props.top).toBe(PANE_PROPS.scroll.bodyRows - 2)
+  expect(footer?.text.startsWith('─'.repeat(PANE_PROPS.bodyColumns))).toBe(true)
 })
 
 test('the footer key t switches between the tabs, and the tab on show is colored', async ($, on) => {

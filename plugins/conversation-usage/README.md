@@ -14,27 +14,33 @@ The button opens a `◔ Usage` pane. The pane is closed by default and never ope
 
 ## Pane
 
-The pane's top rows switch the tab, the view and the grouping; the shown one has a colored background. Its last row
-holds the keys of the tab on show, and stays at the bottom while the pane scrolls.
+The pane's top row switches the tab. Its bottom rows switch the view (on the left) and the grouping (on the right),
+then hold the keys of the tab on show, each under a line. They stay at the bottom while the pane scrolls. The shown
+tab, view and grouping have a colored background. Each table has a dashed line under its column names. A row that
+opens and closes starts with a triangle: `▸` while it is closed, `▾` while it is open. Its count is at the end of the
+row.
 
 - **Conversation** tab: one row per prompt, with its number, its time, its first line, the totals of every request
-  it started, and its request count (`▸ N`). A click on a prompt opens its requests; the last prompt is open until
+  it started, and its request count (`req`). A click on a prompt opens its requests; the last prompt is open until
   it is clicked. A slash command counts as a prompt, and a prompt that made no request, such as `/clear`, has no
   row. A request row holds its number, its time, the tools it called (`—` when it called none, as in a final
   answer), and its input, cache write, cache read, output and total tokens. A subagent has a row of its own under
   the request that launched it, with its totals and its request count. A click on its name opens its requests.
-  Under a rule, three totals follow: the conversation, the current 5-hour window and the current 7-day window. A
+  Under a dashed line, three totals follow: the conversation, the current 5-hour window and the current 7-day window. A
   conversation with no requests yet shows only these totals.
-- **History** tab: every stored conversation, with its start time, title and totals, in cards that open and close.
-  A conversation opens to its prompts, as in the Conversation tab, all closed.
-  A **card** groups the conversations of one project, or of one 5-hour window. Three groupings:
-  - **Date**: day, then project card, then conversation.
-  - **Project**: project card, then day, then conversation.
-  - **Window**: 7-day window, then 5-hour window card, then conversation. A conversation that spans two windows
-    appears in both, and each copy counts only the requests made inside that window.
+- **History** tab: every stored conversation on one row, with its start time, title and totals, under headings
+  that open and close. A conversation opens to its prompts, as in the Conversation tab, all closed. A heading
+  that holds other headings is on a darker band. A heading that holds conversations has a dashed line under it
+  while it is open. Every level starts at the left edge. Three groupings:
+  - **Date**: day, then project, then conversation.
+  - **Project**: project, then day, then conversation.
+  - **Window**: 7-day window, then 5-hour window, then conversation. A conversation that spans two windows
+    appears in both, and each copy counts only the requests made inside that window. A copy that starts before its
+    window has `↳` before its title.
 - **Prices** tab: the price of each model in USD per million tokens, for input, a 5-minute cache write, a 1-hour
-  cache write, a cache read and output, and the factors for fast mode and long context. The cost of a request is
-  its tokens of each type times these prices. A model missing from the table has no cost, shown as `?`.
+  cache write, a cache read and output. Under a dashed line, one bullet each gives the cache write prices and the
+  factors for fast mode and long context. The cost of a request is its tokens of each type times these prices. A
+  model missing from the table has no cost, shown as `?`.
 - Four views show the same rows in the Conversation and History tabs: **Tokens**, **Cost** (estimated cost per token type), **Both**, and **Chart** (one
   bar per request, split by token type).
 
@@ -50,7 +56,7 @@ project is the last segment of the working directory it started in.
 | `v` | Next view | the Conversation and History tabs |
 | `g` | Next grouping | the History tab |
 | `h` | Close the pane | the pane |
-| Enter or click | Open or close the focused row or card | the pane |
+| Enter or click | Open or close the focused row | the pane |
 | Esc | Close the pane | the pane |
 
 The keys work while the band or the pane has the focus (click it, or press ctrl+x then tab). The `/conversation-usage`

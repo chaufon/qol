@@ -17,7 +17,6 @@ const NOT_APPLY_LINE = 'Grammar check does not apply to the last prompt'
 const NO_CHECK_LINE = 'Grammar: no check for the last prompt'
 const BLOCK = /```grammar-json\s*\n[\s\S]*?\n\s*```\s*/
 const BLOCK_OPEN = '```grammar-json'
-const BAR_WIDTH = 8
 const TYPE_WIDTH = 15
 
 const last = atom({ plugin: 'grammar-tracker', key: 'last' } as const, null)
@@ -103,17 +102,15 @@ export function cell(text: string, width: number): string {
   return text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width)
 }
 
-// A bar of up to BAR_WIDTH blocks, as long against the largest count as the count is.
-export function bar(count: number, largest: number): string {
-  return '█'.repeat(Math.max(1, Math.round((count / largest) * BAR_WIDTH)))
+// The width of the Count column in a Top mistakes row: the header "Count", or the largest count when it is wider.
+export function countColumn(largest: number): number {
+  return Math.max('Count'.length, String(largest).length)
 }
 
-// The width of the Mistake column in a Top mistakes row, so the row fits the pane on one line. The row holds the
-// arrow and "# ", the rank, the type, the mistake and the count column: the bar, the largest count and the recurring
-// mark ("████ 68 ⟳").
+// The width of the Mistake column in a Top mistakes row, so the row fits the pane on one line. The row holds the open
+// mark and the rank ("▾  3 "), the type, two spaces, the mistake and the Count column.
 export function mistakeColumn(paneWidth: number, largest: number): number {
-  const countWidth = BAR_WIDTH + 1 + String(largest).length + 2
-  return Math.max(8, paneWidth - 2 - 3 - TYPE_WIDTH - 1 - 1 - countWidth)
+  return Math.max(8, paneWidth - 5 - TYPE_WIDTH - 2 - countColumn(largest))
 }
 
 // The Python command found, kept while the module is loaded. A failed search is not kept, so a Python installed later
@@ -255,7 +252,8 @@ export const register: Register = on => {
           : <Text dimColor>{` ${label} `}</Text>}
       </Button>
     )
-    // The keys, on the last row the pane shows: the pane has no footer of its own, so the row moves with the scroll.
+    // The keys, on the last row the pane shows, under a line: the pane has no footer of its own, so the two rows move
+    // with the scroll.
     const { offset, bodyRows } = e.props.scroll
     const keys: [string, string, string, () => void][] = [
       ['tab-next', 't', 'Tab', () => void showTab($, current === 'last' ? 'top' : 'last')],
@@ -263,12 +261,15 @@ export const register: Register = on => {
     ]
     const used = keys.reduce((n, [, hotkey, label]) => n + hotkey.length + label.length + 4, 0)
     const footer = (
-      <Box position="absolute" top={offset + bodyRows - 1} left={0} width={width}>
-        {keys.map(([key, hotkey, label, press]) => [
-          <Button key={key} plain hotkey={hotkey} dimColor onPress={press}>{label}</Button>,
-          <Text key={`${key}-gap`}>{'  '}</Text>,
-        ])}
-        <Text>{' '.repeat(Math.max(0, width - used))}</Text>
+      <Box position="absolute" top={offset + bodyRows - 2} left={0} width={width} flexDirection="column">
+        <Text dimColor>{'─'.repeat(width)}</Text>
+        <Box>
+          {keys.map(([key, hotkey, label, press]) => [
+            <Button key={key} plain hotkey={hotkey} dimColor onPress={press}>{label}</Button>,
+            <Text key={`${key}-gap`}>{'  '}</Text>,
+          ])}
+          <Text>{' '.repeat(Math.max(0, width - used))}</Text>
+        </Box>
       </Box>
     )
 
@@ -311,19 +312,23 @@ export const register: Register = on => {
       const open = await read($, openRow)
       const largest = Math.max(...mistakes.map(o => o.count))
       const mistakeWidth = mistakeColumn(width, largest)
+      const countWidth = countColumn(largest)
       const cardWidth = width - 2
+      const recurring = mistakes.filter(o => o.isRecurring).length
+      const total = mistakes.reduce((sum, o) => sum + o.count, 0)
       return (
         <Box flexDirection="column">
-          <Text dimColor>{`  ${cell('#', 3)}${cell('Type', TYPE_WIDTH)} ${cell('Mistake', mistakeWidth)} Count`}</Text>
+          <Text dimColor>{` ${'#'.padStart(3)} ${cell('Type', TYPE_WIDTH)}  ${cell('Mistake', mistakeWidth)}${'Count'.padStart(countWidth)}`}</Text>
+          <Text dimColor>{` ${'-'.repeat(3)} ${'-'.repeat(TYPE_WIDTH - 1)}   ${'-'.repeat(mistakeWidth - 1)} ${'-'.repeat(countWidth)}`}</Text>
           {mistakes.map((o, n) => {
             const id = `${o.type}:${o.identifier}`
             const isOpen = open === id
+            // Only the open row has a mark; the count is yellow for a recurring mistake.
             const row = (
               <Button key={`row-${n}`} plain onPress={() => update($, openRow, () => (isOpen ? null : id))}>
-                {`${isOpen ? '▾' : '▸'} ${cell(String(n + 1), 3)}${cell(capitalize(o.typeLabel), TYPE_WIDTH)} `}
-                {`${cell(o.identifier, mistakeWidth)} `}
-                <Text color={o.isRecurring ? 'warning' : 'suggestion'}>{bar(o.count, largest)}</Text>
-                {` ${o.count}${o.isRecurring ? ' ⟳' : ''}`}
+                {`${isOpen ? '▾' : ' '}${String(n + 1).padStart(3)} ${cell(capitalize(o.typeLabel), TYPE_WIDTH)}  `}
+                {cell(o.identifier, mistakeWidth)}
+                <Text color={o.isRecurring ? 'warning' : 'success'}>{String(o.count).padStart(countWidth)}</Text>
               </Button>
             )
             if (!isOpen) return row
@@ -340,13 +345,15 @@ export const register: Register = on => {
               </Box>
             )
           })}
+          <Text> </Text>
+          <Text>{`${recurring} recurring · ${total} mistakes in the top ${mistakes.length}`}</Text>
         </Box>
       )
     }
 
     const topMistakes = await read($, top)
     return (
-      <Box flexDirection="column" width={width} minHeight={bodyRows} paddingBottom={1}>
+      <Box flexDirection="column" width={width} minHeight={bodyRows} paddingBottom={2}>
         <Text dimColor>{'─'.repeat(width)}</Text>
         <Box gap={1}>
           {tabButton('last', 'Last prompt')}

@@ -60,6 +60,9 @@ async function press($: Engine, ui: { redraw(): Promise<void> }, key: string) {
 const base = { current: CONVERSATION, now: NOW, windowTotals: [{ window: WINDOW, usage: { tokens: tok({ output: 5 }), cost: null } }] }
 const texts = async (ui: { findAll(q: { type: 'Text' }): Promise<{ text?: string | undefined }[]> }) =>
   (await ui.findAll({ type: 'Text' })).map((t) => t.text ?? '').join('\n')
+// A row that starts with the triangle `arrow` and holds `label` a few cells later, ending with the count `count`.
+const row = (arrow: '▸' | '▾', label: string, count: number) =>
+  new RegExp(`(^|\n)${arrow} \n(?:[^\n]*\n){0,3}${label}[^\n]*\n(?:[^\n]*\n){5} *${count}(\n|$)`)
 
 test('the Tokens view shows cache write, the subagent row and its count', async ($, on) => {
   seed(on, { ...base })
@@ -68,8 +71,7 @@ test('the Tokens view shows cache write, the subagent row and its count', async 
     const all = await texts(ui)
     expect(all).toContain('18.4k')
     expect(all).toContain('↳')
-    expect(all).toContain('Explore the code')
-    expect(all).toContain('▸ 1')
+    expect(all).toMatch(row('▸', 'Explore the code', 1))
     expect(all).toContain('5-hour window (')
     await ui.unmount()
   }
@@ -115,7 +117,7 @@ test('barSegments splits by largest remainder and never loses a small bar', () =
   expect(barSegments(ZERO_TOKENS, 100, 10)).toEqual([0, 0, 0, 0])
 })
 
-test('History by date shows Today, the project card and a collapsed conversation', async ($, on) => {
+test('History by date shows Today, the project heading and a collapsed conversation', async ($, on) => {
   seed(on, { ...base, tab: 'history', history: HISTORY })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -123,9 +125,22 @@ test('History by date shows Today, the project card and a collapsed conversation
     expect(all).toContain('Today · ')
     expect(all).toContain('qol')
     expect(all).toContain('Build the usage pane')
-    expect(all).toMatch(/▸ 3/)
+    expect(all).toMatch(/(^|\n)▸ \n/)
+    expect(all).toMatch(/\n {3}3(\n|$)/)
     await ui.unmount()
   }
+})
+
+test('History draws a conversation on one row with no cards, and a dashed line under its project', async ($, on) => {
+  seed(on, { ...base, tab: 'history', history: HISTORY })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const conv = (await ui.findAll({ type: 'Button' })).filter((b) => b.text.includes('Build the usage pane'))
+  expect(conv).toHaveLength(1)
+  expect(conv[0]!.text).toMatch(/^▸ \d\d:\d\d +Build the usage pane .* 3$/)
+  expect((await ui.findAll({ type: 'Box' })).some((b) => b.props.borderStyle !== undefined)).toBe(false)
+  const all = await texts(ui)
+  expect(all.indexOf(`  ${'-'.repeat(78)}`)).toBeGreaterThan(all.indexOf('qol'))
+  await ui.unmount()
 })
 
 test('History names the token columns', async ($, on) => {
@@ -171,14 +186,12 @@ test('the Conversation tab lists prompts, the last one open, and a press closes 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   let all = await texts(ui)
   expect(all).toContain('prompt / tools')
-  expect(all).toContain('Explore the repo')
-  expect(all).toContain('Write the fix')
-  expect(all).toContain('▸ 2')
-  expect(all).toContain('▾ 1')
+  expect(all).toMatch(row('▸', 'Explore the repo', 2))
+  expect(all).toMatch(row('▾', 'Write the fix', 1))
   expect(all).not.toContain('Agent, Read')
   await press($, ui, 'prompt:2')
   all = await texts(ui)
-  expect(all).toContain('▸ 1')
+  expect(all).toMatch(row('▸', 'Write the fix', 1))
   await press($, ui, 'prompt:1')
   expect(await texts(ui)).toContain('Agent, Read')
   await ui.unmount()
@@ -212,6 +225,8 @@ test('the Prices tab lists every price of a model and the factors', async ($, on
   expect(all).toContain('claude-haiku-5-5')
   expect(all).toContain('$0.125')
   expect(all).toContain('Fast mode on claude-opus-5-5 and claude-opus-5')
+  expect(all).toContain('• \nFast mode on')
+  expect(all.split('\n').filter((l) => l.startsWith('-------'))).toHaveLength(2)
   expect(all).not.toContain('Tokens')
   await ui.unmount()
 })
@@ -223,7 +238,7 @@ test('pressing the subagent row opens its requests behind ┃', async ($, on) =>
   await press($, ui, 'sub:A')
   const all = await texts(ui)
   expect(all).toContain('┃')
-  expect(all).toContain('▾ 1')
+  expect(all).toMatch(row('▾', 'Explore the code', 1))
   await ui.unmount()
 })
 
@@ -281,7 +296,18 @@ test('the tab and grouping switches change what is drawn', async ($, on) => {
   await ui.unmount()
 })
 
-test('the footer holds the keys of the tab on show, on the last row the pane shows', async ($, on) => {
+test('a dashed rule is under the column names and over the totals', async ($, on) => {
+  seed(on, { ...base })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const all = await texts(ui)
+  const rule = '  -- ----- ------------------------  ------- ------- ------- ------- ------- ---'
+  expect(all.split('\n').filter((l) => l === rule)).toHaveLength(2)
+  expect(all.indexOf(rule)).toBeGreaterThan(all.indexOf('prompt / tools'))
+  expect(all.lastIndexOf(rule)).toBeLessThan(all.indexOf('Conversation      '))
+  await ui.unmount()
+})
+
+test('the footer holds the keys of the tab on show, on the last row the pane shows, under a line', async ($, on) => {
   seed(on, { ...base, history: HISTORY })
   answerHistory(on)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -292,6 +318,19 @@ test('the footer holds the keys of the tab on show, on the last row the pane sho
   await press($, ui, 'tab-next')
   expect(await labels()).toEqual(['Tab', 'Hide'])
   const footer = (await ui.findAll({ type: 'Box' })).find((b) => b.props.position === 'absolute')
-  expect(footer?.props.top).toBe(29)
+  expect(footer?.props.top).toBe(28)
+  expect(footer?.text.startsWith('─'.repeat(80))).toBe(true)
+  await ui.unmount()
+})
+
+test('the view and grouping switches sit at the bottom, over the keys', async ($, on) => {
+  seed(on, { ...base, tab: 'history', history: HISTORY })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const footer = (await ui.findAll({ type: 'Box' })).find((b) => b.props.position === 'absolute')
+  expect(footer?.props.top).toBe(26)
+  const text = footer?.text ?? ''
+  expect(text.indexOf('Tokens')).toBeLessThan(text.indexOf('Date'))
+  expect(text.indexOf('Window')).toBeLessThan(text.indexOf('Tab'))
+  expect((await texts(ui)).indexOf('Tokens')).toBeGreaterThan((await texts(ui)).indexOf('Build the usage pane'))
   await ui.unmount()
 })

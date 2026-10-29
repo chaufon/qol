@@ -233,7 +233,7 @@ export const historyTree = (
   const byId = new Map(h.conversations.map((c) => [c.id, c]))
   const isNow = (w: Window) => w.start <= now && now < w.end
   const sorted = (kind: Window['kind']) => h.windows.filter((w) => w.kind === kind).sort((a, b) => b.start - a.start)
-  const cardOf = (parent: string, w: Window, fresh: boolean): Node => {
+  const fiveHourNode = (parent: string, w: Window, fresh: boolean): Node => {
     const key = `${parent}fiveHour:${w.start}`
     const kids: Node[] = []
     for (const s of h.slices) {
@@ -253,13 +253,13 @@ export const historyTree = (
     const nodes: Node[] = weeks.map((w, i) => {
       const key = `week:${w.start}`
       const open = fresh && i === 0
-      const cards = fives.filter((f) => inWeek(f, w)).map((f) => cardOf(`${key}/`, f, open))
+      const fiveHours = fives.filter((f) => inWeek(f, w)).map((f) => fiveHourNode(`${key}/`, f, open))
       const usage = h.slices
         .filter((s) => s.kind === 'seven_day' && s.windowStart === w.start)
         .reduce((u, s) => addUsage(u, s.usage), EMPTY)
-      return group(key, 'week', `7-day window · ${dateText(w.start)} → ${dateText(w.end)}`, open, cards, { isNow: isNow(w), usage })
+      return group(key, 'week', `7-day window · ${dateText(w.start)} → ${dateText(w.end)}`, open, fiveHours, { isNow: isNow(w), usage })
     })
-    for (const f of fives) if (!weeks.some((w) => inWeek(f, w))) nodes.push(cardOf('', f, fresh && nodes.length === 0))
+    for (const f of fives) if (!weeks.some((w) => inWeek(f, w))) nodes.push(fiveHourNode('', f, fresh && nodes.length === 0))
     return nodes
   }
   return build(true)

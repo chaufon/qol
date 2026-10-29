@@ -104,14 +104,17 @@ The `mistake_types` table in the database holds the types of mistake. Its column
 - Claude Code places the pane: a sidebar on the right in the fullscreen layout at 110 columns or more, otherwise a box
   above the prompt.
 - The pane's top row switches between its two tabs; the shown one has a colored background. Its last row holds the
-  keys, `t: Tab` and `h: Hide`, and stays at the bottom while the pane scrolls. `t` switches the tab while the pane
+  keys, `t: Tab` and `h: Hide`, under a line, and both stay at the bottom while the pane scrolls. `t` switches the tab while the pane
   has the focus.
 - **Last prompt** tab: one card per mistake. The card's border shows the number, type, identifier and counter
   (`1 · Word choice · "looks like" ×3 ⟳`). Inside are the original sentence in red (`✗`), the corrected sentence in
   green (`✓`), Claude's reason, and the type's description and example, dimmed. Recurring mistakes have a yellow
   border and `⟳`. The corrected prompt is in its own card at the end.
-- **Top mistakes** tab: a table of the 10 most frequent mistakes with rank, type, identifier and a bar with the
-  counter, read again each time the tab is shown. A click on a row opens a card under it, and a second click closes it; one row is open at a time. The card's
+- **Top mistakes** tab: a table of the 10 most frequent mistakes with rank, type, identifier and counter, read again
+  each time the tab is shown. Each column has a dashed line under its header. The counter is yellow for a recurring
+  mistake and green otherwise. A line under the table gives the number of recurring mistakes and the sum of the
+  counters. A click on a row opens a card under it and marks the row with `▾`, and a second click closes it; one row
+  is open at a time. The card's
   border shows the type's description (cut with `…` when the border is too short, and then repeated in full inside).
   Inside are the type's example and the most recent original sentence, corrected sentence and reason.
 - Failures go to `errors.log` next to the database and never block Claude Code. A failure of the stop hook or of the
