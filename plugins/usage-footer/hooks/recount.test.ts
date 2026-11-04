@@ -1,14 +1,16 @@
 import type { SessionContextBreakdown } from 'claude-code'
 import type { TestBody } from 'claude-code/testing'
+
 import { expect, mock, test } from 'claude-code/testing'
 
-type Usage = { window: number; estimate: number; counts?: number }
+type Usage = { window: number; estimate: number; counts?: number; tokens?: number }
 type TestEngine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
 
 // Stands in for the engine: a session starts in its folder, commands print
 // nothing, and the usage call reads the window and, counted as /context counts
 // it, the size the test sets; each count of that kind adds to `usage.counts`.
+// `usage.tokens` is the engine's reading, absent until a response.
 const engine = (on: On, usage: Usage) => {
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
@@ -20,6 +22,7 @@ const engine = (on: On, usage: Usage) => {
       value: {
         startedAt: 0,
         context: {
+          tokens: usage.tokens,
           window: usage.window,
           breakdown: e.breakdown !== 'full' ? undefined : ({ totalTokens: usage.estimate } as SessionContextBreakdown),
         },
@@ -51,7 +54,7 @@ for (const command of ['clear', 'rewind', 'resume']) {
 
     await run($, command)
 
-    expect(await footer($)).toContain('📚 21k 11% of 200k')
+    expect(await footer($)).toContain('📚 ~21k 11% of 200k')
   })
 }
 
@@ -61,7 +64,7 @@ test('a new session shows the estimated size of its conversation', async ($, on)
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect(await footer($)).toContain('📚 21k 11% of 200k')
+  expect(await footer($)).toContain('📚 ~21k 11% of 200k')
 })
 
 test('/model keeps the size and measures it against the new window', async ($, on) => {
@@ -104,7 +107,7 @@ test('a reading of the conversation /clear left leaves the estimate', async ($, 
   await run($, 'clear')
   await measured($)
 
-  expect(await footer($)).toContain('📚 21k 11% of 200k')
+  expect(await footer($)).toContain('📚 ~21k 11% of 200k')
 })
 
 const withWindows = ($: TestEngine) =>
@@ -144,4 +147,47 @@ test('a reading without rate limits drops a window that has reset', async ($, on
   await $.session.measure({ context: { tokens: 21_000, window: 200_000, percent: 11 }, rateLimits: [], changed: ['context', 'rateLimits'] })
 
   expect(await footer($)).not.toContain('🔋')
+})
+
+
+const start = ($: TestEngine) => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+test('a size the servers measured has no mark', async ($, on) => {
+  mock.clock(on, { now: 0 })
+  engine(on, { window: 200_000, estimate: 21_000 })
+  await measured($)
+
+  expect(await footer($)).toContain('📚 122k 61% of 200k')
+})
+
+test('a conversation that starts with a reading shows it without the mark', async ($, on) => {
+  mock.clock(on, { now: 0 })
+  engine(on, { window: 200_000, estimate: 21_000, tokens: 122_000 })
+
+  await start($)
+
+  expect(await footer($)).toContain('📚 122k')
+  expect(await footer($)).not.toContain('~')
+})
+
+test('the next response replaces the estimate and its mark', async ($, on) => {
+  mock.clock(on, { now: 0 })
+  engine(on, { window: 200_000, estimate: 21_000 })
+  await measured($)
+  await run($, 'clear')
+
+  await $.session.measure({ context: { tokens: 25_000, window: 200_000, percent: 13 }, rateLimits: [], changed: ['context'] })
+
+  expect(await footer($)).toContain('📚 25k 13% of 200k')
+  expect(await footer($)).not.toContain('~')
+})
+
+test('/model keeps the mark of an estimate', async ($, on) => {
+  mock.clock(on, { now: 0 })
+  engine(on, { window: 1_000_000, estimate: 21_000 })
+  await start($)
+
+  await run($, 'model')
+
+  expect(await footer($)).toContain('📚 ~21k 2% of 1M')
 })

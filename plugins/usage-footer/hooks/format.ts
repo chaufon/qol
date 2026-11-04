@@ -62,7 +62,7 @@ export const segments = (s: Snapshot, now: number): Segment[] => {
   if (s.contextTokens === null) {
     out.push({ text: '–', isDim: true })
   } else {
-    const size: Segment = { text: tokens(s.contextTokens), tone: contextTone(s.contextTokens), isBold: true }
+    const size: Segment = { text: `${s.isEstimate ? '~' : ''}${tokens(s.contextTokens)}`, tone: contextTone(s.contextTokens), isBold: true }
     const hint = contextHint(s)
 
     out.push(hint === null ? size : { ...size, hint })

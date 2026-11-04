@@ -6,6 +6,7 @@ const at = (h: number, m: number) => new Date(2026, 9, 19, h, m)
 
 const EMPTY = {
   contextTokens: null,
+  isEstimate: false,
   contextPercent: null,
   contextWindow: null,
   fiveHourPercent: null,
@@ -62,6 +63,12 @@ test('the size shows alone, its share of the window is its hint', () => {
 
   expect(plain(parts)).toBe('📚 61k ┊ ████▎░░░░░ 42% 🔔 15:10 (1h 22m)')
   expect(parts.find(p => p.text === '61k')).toEqual({ text: '61k', tone: 'success', isBold: true, hint: '31% of 200k' })
+})
+
+test('an estimated size starts with ~', () => {
+  const parts = segments({ ...EMPTY, contextTokens: 21_000, isEstimate: true, contextPercent: 11, contextWindow: 200_000 }, 0)
+
+  expect(plain(parts)).toBe('📚 ~21k')
 })
 
 test('the hint needs the percentage and the window', () => {

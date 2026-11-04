@@ -1,5 +1,7 @@
 export type Snapshot = {
   contextTokens: number | null
+  // The size is the count /context shows, not one Claude's servers measured.
+  isEstimate: boolean
   contextPercent: number | null
   contextWindow: number | null
   fiveHourPercent: number | null

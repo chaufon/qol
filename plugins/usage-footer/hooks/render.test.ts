@@ -1,4 +1,4 @@
-import type { RenderElement, SessionMessage } from 'claude-code'
+import type { RenderElement } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 // The children of the footer's root Box.
@@ -27,50 +27,6 @@ test('the footer draws size, window and reset with their colors', async ($, on) 
     expect(await span('(20m)')).toMatchObject({ color: 'error' })
     await ui.unmount()
   }
-})
-
-test('the footer shows the size a compaction reports until the next response', async ($, on) => {
-  mock.clock(on, { now: new Date(2026, 9, 19, 14, 50).getTime() })
-  on('session.measure', ($, e) => ({ changed: e.changed }))
-  const summary: SessionMessage = { role: 'user', text: 'summary', toolUses: [] }
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
-  on('session.compact', () => ({ messages: [summary], tokensBefore: 122_000, tokensAfter: 18_000 }))
-
-  await $.session.measure({ context: { tokens: 122_000, window: 200_000, percent: 61 }, rateLimits: [], changed: ['context'] })
-  await $.session.compact({ trigger: 'manual', messages: [summary] })
-
-  const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
-  const span = async (text: string) => (await ui.findAll({ type: 'Text', text })).at(-1)?.props
-
-  expect(await span('18k')).toMatchObject({ color: 'success', bold: true })
-  expect((await ui.find({ type: 'Text', text: ' 9% of 200k ' }))?.props).toMatchObject({ inverse: true })
-
-  await $.session.measure({ context: { window: 200_000 }, rateLimits: [], changed: ['rateLimits'] })
-  expect(await span('18k')).toMatchObject({ color: 'success' })
-  await ui.unmount()
-})
-
-test('a reading of the conversation before the compaction leaves the compacted size', async ($, on) => {
-  mock.clock(on, { now: new Date(2026, 9, 19, 14, 50).getTime() })
-  on('session.measure', ($, e) => ({ changed: e.changed }))
-  const summary: SessionMessage = { role: 'user', text: 'summary', toolUses: [] }
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
-  on('session.compact', () => ({ messages: [summary], tokensBefore: 122_000, tokensAfter: 18_000 }))
-  const reading = (tokens: number) =>
-    $.session.measure({ context: { tokens, window: 200_000, percent: Math.round(tokens / 2_000) }, rateLimits: [], changed: ['cost'] })
-
-  await reading(122_000)
-  await $.session.compact({ trigger: 'manual', messages: [summary] })
-  await reading(122_000)
-
-  const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
-  const footer = async () => (await ui.find({ type: 'Box' }))?.text ?? ''
-
-  expect(await footer()).toContain('📚 18k')
-
-  await reading(25_000)
-  expect(await footer()).toContain('📚 25k')
-  await ui.unmount()
 })
 
 test('a pointer over the size reveals its share of the window on the row above', async ($, on) => {

@@ -14,6 +14,7 @@ const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]
 
   return {
     contextTokens: context.tokens ?? null,
+    isEstimate: false,
     contextPercent: context.percent ?? null,
     contextWindow: context.window,
     fiveHourPercent: fiveHour?.percentUsed ?? null,
@@ -51,11 +52,13 @@ const recount = async ($: EngineInterface, kind: Recount) => {
 
   await update($, snapshot, s => {
     const base = s ?? toSnapshot(context, [])
-    const tokens = kind === 'estimate' ? (context.breakdown?.totalTokens ?? base.contextTokens) : base.contextTokens
+    const counted = kind === 'estimate' ? context.breakdown?.totalTokens : undefined
+    const tokens = counted ?? base.contextTokens
 
     return {
       ...base,
       contextTokens: tokens,
+      isEstimate: counted !== undefined || base.isEstimate,
       contextPercent: tokens === null ? null : Math.round((tokens / context.window) * 100),
       contextWindow: context.window,
     }
@@ -64,7 +67,7 @@ const recount = async ($: EngineInterface, kind: Recount) => {
 
 export const register: Register = on => {
   // The engine's latest reading, and a reading of a conversation that a
-  // compaction or a command replaced: the engine repeats it until a response.
+  // command replaced: the engine repeats it until a response.
   let lastReading: number | undefined
   let stale: number | undefined
 
@@ -78,7 +81,12 @@ export const register: Register = on => {
       const tokens = read.contextTokens ?? usage.context.breakdown?.totalTokens ?? null
       const percent = tokens === null ? null : Math.round((tokens / usage.context.window) * 100)
 
-      return { ...read, contextTokens: tokens, contextPercent: read.contextPercent ?? percent }
+      return {
+        ...read,
+        contextTokens: tokens,
+        isEstimate: read.contextTokens === null && tokens !== null,
+        contextPercent: read.contextPercent ?? percent,
+      }
     })
     await $.clock.now().then(t => update($, now, () => t))
     $.clock.every(30_000, () => void $.clock.now().then(t => update($, now, () => t)))
@@ -95,8 +103,10 @@ export const register: Register = on => {
       const fresh = keepWindows(toSnapshot(e.context, e.rateLimits), s, t)
 
       // Until the first response on the new conversation, keep the size the
-      // compaction or the recount reported.
-      return isStale && s !== null ? { ...fresh, contextTokens: s.contextTokens, contextPercent: s.contextPercent } : fresh
+      // recount reported.
+      return isStale && s !== null
+        ? { ...fresh, contextTokens: s.contextTokens, isEstimate: s.isEstimate, contextPercent: s.contextPercent }
+        : fresh
     })
     await update($, now, () => t)
 
@@ -121,28 +131,6 @@ export const register: Register = on => {
     return result
   })
 
-  // A compacted conversation has no reading until its next response, so the
-  // footer shows the size the compaction reports.
-  on('session.compact', async ($, e, next) => {
-    const result = await next(e)
-
-    if (e.trigger === 'precompute' || e.agentId !== undefined || result.messages === undefined) {
-      return result
-    }
-
-    stale = lastReading
-    const { context } = await $.session.usage()
-    const tokens = result.tokensAfter ?? null
-    await update($, snapshot, s => ({
-      ...(s ?? toSnapshot(context, [])),
-      contextTokens: tokens,
-      contextPercent: tokens === null ? null : Math.round((tokens / context.window) * 100),
-      contextWindow: context.window,
-    }))
-
-    return result
-  })
-
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const stored = await read($, snapshot)
 
@@ -154,6 +142,7 @@ export const register: Register = on => {
     // added since.
     const s: Snapshot = {
       ...stored,
+      isEstimate: stored.isEstimate ?? false,
       contextWindow: stored.contextWindow ?? null,
       sevenDayPercent: stored.sevenDayPercent ?? null,
       sevenDayResetsAt: stored.sevenDayResetsAt ?? null,
