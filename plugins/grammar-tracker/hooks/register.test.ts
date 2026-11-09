@@ -153,7 +153,7 @@ test('stripCheck leaves other text unchanged', () => {
 test('toCheck and bandLine summarize the output of save_check.py', () => {
   expect(bandLine(toCheck(SAVE_OUTPUT)!)).toBe('Grammar: 2 mistakes, 1 recurring')
   expect(bandLine(toCheck({ does_not_apply: true })!)).toBe('Grammar check does not apply to the last prompt')
-  expect(bandLine(toCheck({ ...SAVE_OUTPUT, occurrences: [] })!)).toBe('Grammar: no mistakes')
+  expect(bandLine(toCheck({ ...SAVE_OUTPUT, occurrences: [] })!)).toBe('No mistakes. Great English, keep it up!')
   expect(toCheck({ systemMessage: 'Grammar tracker: failed to log (see errors.log)' })).toBe(null)
 })
 
@@ -208,16 +208,15 @@ test('the chunks of the reply pass on unchanged', async ($, on) => {
   expect(await stream($, calls, chunks)).toEqual(chunks)
 })
 
-test('the band says checking and the pane dims the check before while the reply streams', async ($, on) => {
+test('the band says checking and the pane hides the check before while the reply streams', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
   await startTurn($, 'next prompt', 't2')
   expect(await bandHas($, 'Grammar: checking…')).toBe(true)
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: '⠋ Checking this prompt…' })).toBeDefined()
-  const dimmed = (await pane.findAll({ type: 'Text' })).find(t => t.text === '✗ c')
-  expect(dimmed?.props.dimColor).toBe(true)
-  expect(dimmed?.props.color).toBeUndefined()
+  expect(await pane.find({ text: '✗ c' })).toBeUndefined()
+  expect(await pane.find({ text: ' Corrected prompt ' })).toBeUndefined()
 })
 
 test('the pane shows only the checking line while the first prompt is checked', async ($, on) => {
@@ -413,11 +412,32 @@ test('the Last prompt tab leaves out the parentheses for an empty example', asyn
   expect(await pane.find({ text: 'A wrong, missing or extra "a/an" or "the".' })).toBeDefined()
 })
 
-test('the Last prompt tab says when there are no mistakes', async ($, on) => {
+test('the Last prompt tab praises a check with no mistakes and shows the corrected prompt', async ($, on) => {
   const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ text: '✓ No mistakes' })).toBeDefined()
+  const praise = (await pane.findAll({ type: 'Text' })).find(t => t.text === '✓ No mistakes. Great English, keep it up!')
+  expect(praise?.props.color).toBe('success')
+  expect(praise?.props.bold).toBe(true)
+  expect(praise?.props.dimColor).toBeFalsy()
+  expect(await pane.find({ text: ' Corrected prompt ' })).toBeDefined()
+})
+
+test('a check with no mistakes shows in the band and does not open the pane', async ($, on) => {
+  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
+  await turn($, calls, [CHECK_TEXT])
+  expect(await bandHas($, 'No mistakes. Great English, keep it up!')).toBe(true)
+  expect(calls.opened).toEqual([])
+})
+
+test('a check with no mistakes leaves an open pane open', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  calls.stdout = JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] })
+  await turn($, calls, [CHECK_TEXT], 't2')
+  expect(calls.closed).toEqual([])
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: '✓ No mistakes. Great English, keep it up!' })).toBeDefined()
 })
 
 test('a Top mistakes row opens and closes its example card', async ($, on) => {

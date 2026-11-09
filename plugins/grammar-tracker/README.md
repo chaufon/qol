@@ -98,6 +98,7 @@ The `mistake_types` table in the database holds the types of mistake. Its column
 
 - The band above the prompt shows one line for the last prompt: `Grammar: checking…` while the reply streams,
   `Grammar: 3 mistakes, 1 recurring   g: Show` once the check block closes (the pane may be closed),
+  `No mistakes. Great English, keep it up!` when the check finds none,
   `Grammar check does not apply to the last prompt` as soon as that line streams, or
   `Grammar: no check for the last prompt` (a new conversation, an interrupted reply, a reply without a check block, or
   a failed save). Its `Show` button is always there, so the **Top mistakes** tab is always reachable.
@@ -107,7 +108,7 @@ The `mistake_types` table in the database holds the types of mistake. Its column
   `Hide` in the band or the pane, with `g` while the band has the focus, or with `h` or Esc in the pane. It stays open
   across replies.
 - The pane opens by itself, without taking the focus and on the **Last prompt** tab, when a saved check arrives. It does
-  not open for a check that does not apply, a skipped, interrupted or failed check, or after you hid it by hand. `Show`
+  not open for a check with no mistakes, a check that does not apply, a skipped, interrupted or failed check, or after you hid it by hand. `Show`
   opens it again with the focus and turns the automatic opening back on. An open pane keeps its tab and refreshes. A
   pane the mod opens unasked is held back below 144 columns (110 once you opened it by hand); the band stays the signal.
 - Claude Code places the pane: a sidebar on the right in the fullscreen layout at 110 columns or more, otherwise a box
@@ -115,11 +116,12 @@ The `mistake_types` table in the database holds the types of mistake. Its column
 - The pane's top row switches between its two tabs; the shown one has a colored background. Its last row holds the
   keys, `t: Tab` and `h: Hide`, under a line, and both stay at the bottom while the pane scrolls. `t` switches the tab while the pane
   has the focus.
-- **Last prompt** tab: while the reply streams, the tab shows `⠋ Checking this prompt…` and the check before, dimmed.
+- **Last prompt** tab: while the reply streams, the tab shows only `⠋ Checking this prompt…`.
   Then one card per mistake. The card's border shows the number, type, identifier and counter
   (`1 · Word choice · "looks like" ×3 ⟳`). Inside are the original sentence in red (`✗`), the corrected sentence in
   green (`✓`), Claude's reason, and the type's description and example, dimmed. Recurring mistakes have a yellow
-  border and `⟳`. The corrected prompt is in its own card at the end.
+  border and `⟳`. The corrected prompt is in its own card at the end. A check with no mistakes shows
+  `✓ No mistakes. Great English, keep it up!` in green, then the corrected prompt card.
 - **Top mistakes** tab: a table of the 10 most frequent mistakes with rank, type, identifier and counter, read again
   each time the tab is shown. Each column has a dashed line under its header. The counter is yellow for a recurring
   mistake and green otherwise. A line under the table gives the number of recurring mistakes and the sum of the

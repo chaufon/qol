@@ -14,6 +14,7 @@ const ACCENT = 'planMode'
 const CHECK_LABEL = '**English grammar check:**'
 const NOT_APPLY = 'English grammar check does not apply'
 const NOT_APPLY_LINE = 'Grammar check does not apply to the last prompt'
+const NO_MISTAKES_LINE = 'No mistakes. Great English, keep it up!'
 const NO_CHECK_LINE = 'Grammar: no check for the last prompt'
 const BLOCK = /```grammar-json\s*\n[\s\S]*?\n\s*```\s*/
 const BLOCK_OPEN = '```grammar-json'
@@ -106,7 +107,7 @@ function toOccurrence(o: OccurrenceFields): Occurrence {
 export function bandLine(check: GrammarCheck): string {
   if (check.doesNotApply) return NOT_APPLY_LINE
   const total = check.occurrences.length
-  if (total === 0) return 'Grammar: no mistakes'
+  if (total === 0) return NO_MISTAKES_LINE
   const recurring = check.occurrences.filter(o => o.isRecurring).length
   return `Grammar: ${total} mistake${total === 1 ? '' : 's'}, ${recurring} recurring`
 }
@@ -240,7 +241,7 @@ async function saveCheck($: EngineInterface, current: Turn, reply: string) {
     const check = toCheck(output)
     if (check) {
       await settle($, check)
-      await openPaneForCheck($)
+      if (!check.doesNotApply && check.occurrences.length > 0) await openPaneForCheck($)
     } else {
       await update($, pending, () => false)
       if (output.systemMessage) {
@@ -270,8 +271,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // A main-loop turn that starts with a submitted prompt waits for its check: the band says so and the pane dims the
-  // check before.
+  // A main-loop turn that starts with a submitted prompt waits for its check: the band and the pane say so.
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       const prompt = submitted
@@ -393,27 +393,25 @@ export const register: Register = on => {
       </Box>
     )
     const fitsBorder = (title: string, cardWidth: number) => title.length + 2 <= cardWidth - 4
-    const sentences = (o: Occurrence, isDim = false) => [
-      <Text key="original" color={isDim ? undefined : 'error'} dimColor={isDim}>✗ {o.original}</Text>,
-      <Text key="corrected" color={isDim ? undefined : 'success'} dimColor={isDim}>✓ {o.corrected}</Text>,
-      ...(o.reason ? [<Text key="reason" dimColor={isDim}>{o.reason}</Text>] : []),
+    const sentences = (o: Occurrence) => [
+      <Text key="original" color="error">✗ {o.original}</Text>,
+      <Text key="corrected" color="success">✓ {o.corrected}</Text>,
+      ...(o.reason ? [<Text key="reason" dimColor>{o.reason}</Text>] : []),
     ]
     const example = (o: Occurrence) => (o.typeExample ? `Example: ${o.typeExample}` : '')
 
-    // A check shown dimmed is the one before, while the reply to the next prompt is still being checked.
-    const lastTab = (check: GrammarCheck & { doesNotApply: false }, isDim = false) => (
+    const lastTab = (check: GrammarCheck & { doesNotApply: false }) => (
       <Box flexDirection="column">
-        {check.occurrences.length === 0 ? <Text color={isDim ? undefined : 'success'} dimColor={isDim}>✓ No mistakes</Text> : null}
+        {check.occurrences.length === 0 ? <Text bold color="success">✓ {NO_MISTAKES_LINE}</Text> : null}
         {check.occurrences.map((o, n) => {
           const title = `${n + 1} · ${capitalize(o.typeLabel)} · "${o.identifier}" ×${o.count}${o.isRecurring ? ' ⟳' : ''}`
           const rule = `${o.typeDescription}${o.typeExample ? ` (${o.typeExample})` : ''}`
-          return card(`o${n}`, title, width, o.isRecurring && !isDim ? 'warning' : 'inactive', [
-            ...sentences(o, isDim),
+          return card(`o${n}`, title, width, o.isRecurring ? 'warning' : 'inactive', [
+            ...sentences(o),
             <Text key="rule" dimColor>{rule}</Text>,
           ])
         })}
-        {card('corrected', 'Corrected prompt', width, isDim ? 'inactive' : 'suggestion',
-              [<Text key="text" dimColor={isDim}>{check.correctedPrompt}</Text>])}
+        {card('corrected', 'Corrected prompt', width, 'suggestion', [<Text key="text">{check.correctedPrompt}</Text>])}
       </Box>
     )
 
@@ -479,10 +477,7 @@ export const register: Register = on => {
             await topTab(topMistakes.mistakes)
           )
         ) : isPending ? (
-          <Box flexDirection="column">
-            <Text color={ACCENT}>{CHECKING_PANE}</Text>
-            {check === null || check.doesNotApply ? null : lastTab(check, true)}
-          </Box>
+          <Text color={ACCENT}>{CHECKING_PANE}</Text>
         ) : check === null ? (
           <Text dimColor>No grammar check for the last prompt.</Text>
         ) : check.doesNotApply ? (
