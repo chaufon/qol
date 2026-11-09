@@ -3,7 +3,7 @@ import json
 import pytest
 
 from conftest import ROOT, assistant, block, user
-from lib.transcript import CHECK_LABEL, NOT_APPLY, extract_check, find_transcript, last_turn
+from lib.transcript import CHECK_LABEL, NOT_APPLY, extract_check, find_transcript, user_prompts
 
 PAYLOAD = {
     "input_mode": "dictated",
@@ -15,35 +15,29 @@ PAYLOAD = {
 }
 
 
-def test_last_turn_skips_tool_results_meta_and_notifications(write_transcript):
+def test_user_prompts_skips_tool_results_meta_and_notifications(write_transcript):
     path = write_transcript([
         user("u1", "first prompt"),
         assistant("a1", "old reply"),
         user("u2", "second prompt"),
-        assistant("a2", "part one"),
         user("t1", [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}]),
         user("m1", [{"type": "text", "text": "skill body"}], isMeta=True),
-        assistant("a3", "part two"),
         user("n1", "<task-notification>\n<task-id>x</task-id>"),
-        assistant("a4", "part three"),
     ])
-    turn = last_turn(path)
-    assert turn.prompt_uuid == "u2"
-    assert turn.prompt == "second prompt"
-    assert turn.timestamp == "2026-10-17T12:00:00.000Z"
-    assert turn.reply == "part one\npart two\npart three"
+    assert [(p.uuid, p.text, p.timestamp) for p in user_prompts(path)] == [
+        ("u1", "first prompt", "2026-10-17T12:00:00.000Z"), ("u2", "second prompt", "2026-10-17T12:00:00.000Z")]
 
 
-def test_last_turn_joins_text_blocks_of_a_list_prompt(write_transcript):
+def test_user_prompts_joins_text_blocks_of_a_list_prompt(write_transcript):
     path = write_transcript([
         user("u1", [{"type": "text", "text": "line one"}, {"type": "image", "source": {}},
                     {"type": "text", "text": "line two"}]),
     ])
-    assert last_turn(path).prompt == "line one\nline two"
+    assert user_prompts(path)[0].text == "line one\nline two"
 
 
-def test_last_turn_is_none_without_a_prompt(write_transcript):
-    assert last_turn(write_transcript([assistant("a1", "hi")])) is None
+def test_user_prompts_is_empty_without_a_prompt(write_transcript):
+    assert user_prompts(write_transcript([assistant("a1", "hi")])) == []
 
 
 def test_extract_check_parses_and_normalizes():

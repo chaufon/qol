@@ -62,8 +62,8 @@ def m(type_, identifier, n="", reason=None):
     return Mistake(type=type_, identifier=identifier, original=f"orig{n}", corrected=f"fix{n}", reason=reason)
 
 
-def save(conn, uuid, c):
-    return save_check(conn, prompt_uuid=uuid, session_id="s", created_at="2026-10-17T12:00:00Z",
+def save(conn, turn, c):
+    return save_check(conn, turn_id=turn, session_id="s", created_at="2026-10-17T12:00:00Z",
                       project_dir="/p", original="original", check=c)
 
 
@@ -119,11 +119,11 @@ def occurrence_columns(conn):
     return [row[1] for row in conn.execute("PRAGMA table_info(occurrences)")]
 
 
-def test_new_database_has_seed_types_and_version_3(tmp_path):
+def test_new_database_has_seed_types_and_version_4_unused(tmp_path):
     conn = connect(tmp_path / "g.db")
     types = {t.key: t for t in all_types(conn)}
     assert list(types) == SEED_KEYS
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     assert "reason" in occurrence_columns(conn)
     assert types["word_choice"].description == "A real English word that does not mean what you meant."
     assert types["false_friend"].example == '"actually" instead of "currently"'
@@ -133,7 +133,7 @@ def test_new_database_has_seed_types_and_version_3(tmp_path):
 def test_migration_keeps_every_saved_row(tmp_path):
     path = tmp_path / "g.db"
     old_database(path, [(1, "article", "the"), (2, "spelling", "necessity")], [(1, 1), (1, 2), (2, 1)])
-    queries = ["SELECT * FROM prompts", "SELECT id, type, identifier FROM mistakes",
+    queries = ["SELECT id, prompt_uuid, session_id, created_at, project_dir, input_mode, original, corrected FROM prompts", "SELECT id, type, identifier FROM mistakes",
                "SELECT id, prompt_id, mistake_id, original_sentence, corrected_sentence FROM occurrences"]
     old = sqlite3.connect(path)
     before = [old.execute(q).fetchall() for q in queries]
@@ -179,7 +179,7 @@ def version_1_database(path, word_choice=WORD_CHOICE_1):
 def test_migration_from_2_adds_reason(tmp_path):
     version_2_database(tmp_path / "g.db").close()
     conn = connect(tmp_path / "g.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     assert conn.execute("SELECT original_sentence, reason FROM occurrences").fetchall() == [("orig", None)]
     assert [o.reason for o in save(conn, "u2", check(m("article", "the", reason="a known remote")))] == [
         "a known remote"]
@@ -193,7 +193,7 @@ def test_migration_from_1_adds_types_before_other(tmp_path):
     assert [t.position for t in types] == list(range(1, 18))
     assert types[10].description == "A real English word that does not mean what you meant."
     assert conn.execute("SELECT type, identifier FROM mistakes").fetchall() == [("word_choice", "currently")]
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     assert "reason" in occurrence_columns(conn)
 
 
@@ -208,7 +208,7 @@ def test_connect_twice_changes_nothing(tmp_path):
     connect(tmp_path / "g.db").close()
     conn = connect(tmp_path / "g.db")
     assert len(all_types(conn)) == 17
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 def test_connect_on_migrated_database_from_second_connection_changes_nothing(tmp_path):
@@ -292,3 +292,42 @@ def test_newer_database_is_refused_and_left_unchanged(tmp_path):
     after = sqlite3.connect(path)
     assert after.execute("PRAGMA user_version").fetchone()[0] == VERSION + 1
     assert after.execute("SELECT 1 FROM mistake_types WHERE key = 'false_friend'").fetchall() == []
+
+
+def version_3_database(path):
+    """Build a version 3 database: prompts with a required prompt_uuid and no turn_id, and one saved prompt."""
+    conn = connect(path)
+    save(conn, "t1", check(m("article", "the", 1)))
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("CREATE TABLE prompts_3 (id INTEGER PRIMARY KEY, prompt_uuid TEXT NOT NULL UNIQUE, session_id TEXT,"
+                 " created_at TEXT NOT NULL, project_dir TEXT,"
+                 " input_mode TEXT CHECK (input_mode IN ('typed', 'dictated')), original TEXT NOT NULL,"
+                 " corrected TEXT NOT NULL)")
+    conn.execute("INSERT INTO prompts_3 SELECT id, 'u1', session_id, created_at, project_dir, input_mode, original,"
+                 " corrected FROM prompts")
+    conn.execute("DROP TABLE prompts")
+    conn.execute("ALTER TABLE prompts_3 RENAME TO prompts")
+    conn.execute("PRAGMA user_version = 3")
+    conn.commit()
+    conn.close()
+
+
+def test_migration_from_3_adds_turn_id_and_keeps_prompts_linked(tmp_path):
+    version_3_database(tmp_path / "g.db")
+    conn = connect(tmp_path / "g.db")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("SELECT id, turn_id, prompt_uuid, original FROM prompts").fetchall() == [
+        (1, None, "u1", "original")]
+    assert conn.execute("SELECT prompt_id FROM occurrences").fetchall() == [(1,)]
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert len(top_mistakes(conn, 10)) == 1
+
+
+def test_migration_from_3_allows_prompts_without_uuid_and_dedupes_by_turn(tmp_path):
+    version_3_database(tmp_path / "g.db")
+    conn = connect(tmp_path / "g.db")
+    assert save(conn, "t2", check(m("article", "the", 2))) is not None
+    assert save(conn, "t3", check()) == []
+    assert save(conn, "t2", check(m("article", "the", 2))) is None
+    assert conn.execute("SELECT turn_id, prompt_uuid FROM prompts ORDER BY id").fetchall() == [
+        (None, "u1"), ("t2", None), ("t3", None)]

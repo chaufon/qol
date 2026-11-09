@@ -17,6 +17,9 @@ const NOT_APPLY_LINE = 'Grammar check does not apply to the last prompt'
 const NO_CHECK_LINE = 'Grammar: no check for the last prompt'
 const BLOCK = /```grammar-json\s*\n[\s\S]*?\n\s*```\s*/
 const BLOCK_OPEN = '```grammar-json'
+const BLOCK_CLOSED = /^```grammar-json\s*\n[\s\S]*?\n\s*```/
+const CHECKING_LINE = 'Grammar: checking…'
+const CHECKING_PANE = '⠋ Checking this prompt…'
 const TYPE_WIDTH = 15
 
 const last = atom({ plugin: 'grammar-tracker', key: 'last' } as const, null)
@@ -24,6 +27,8 @@ const isOpen = atom({ plugin: 'grammar-tracker', key: 'isOpen' } as const, false
 const tab = atom({ plugin: 'grammar-tracker', key: 'tab' } as const, 'last')
 const top = atom({ plugin: 'grammar-tracker', key: 'top' } as const, null as TopMistakes)
 const openRow = atom({ plugin: 'grammar-tracker', key: 'openRow' } as const, null as string | null)
+const pending = atom({ plugin: 'grammar-tracker', key: 'pending' } as const, false)
+const manualHide = atom({ plugin: 'grammar-tracker', key: 'manualHide' } as const, false)
 
 type OccurrenceFields = {
   type: string
@@ -38,7 +43,7 @@ type OccurrenceFields = {
   is_recurring: boolean
 }
 
-type StopHookOutput = {
+type SaveOutput = {
   systemMessage?: string
   does_not_apply?: true
   corrected_prompt?: string
@@ -63,7 +68,20 @@ export function stripCheck(text: string): string {
   return text
 }
 
-export function toCheck(output: StopHookOutput): GrammarCheck | null {
+// What the reply streamed so far says about the check: 'check' once its grammar-json block is closed, 'not-apply' once
+// the does-not-apply line is in, 'waiting' while the start of the reply can still become either, and 'unlikely' once
+// the reply cannot be a check.
+export type CheckState = 'check' | 'not-apply' | 'waiting' | 'unlikely'
+
+export function checkState(text: string): CheckState {
+  const start = text.trimStart()
+  const body = start.startsWith(CHECK_LABEL) ? start.slice(CHECK_LABEL.length).trimStart() : start
+  if (body.startsWith(NOT_APPLY)) return 'not-apply'
+  if (body.startsWith(BLOCK_OPEN)) return BLOCK_CLOSED.test(body) ? 'check' : 'waiting'
+  return [CHECK_LABEL, NOT_APPLY, BLOCK_OPEN].some(opener => opener.startsWith(body)) ? 'waiting' : 'unlikely'
+}
+
+export function toCheck(output: SaveOutput): GrammarCheck | null {
   if (output.does_not_apply) return { doesNotApply: true }
   if (output.occurrences === undefined) return null
   const occurrences = output.occurrences.map(toOccurrence)
@@ -178,40 +196,128 @@ async function showTab($: EngineInterface, id: PaneTab) {
   if (id === 'top') await loadTop($)
 }
 
-async function openPane($: EngineInterface) {
+// Opens the pane. The Show button opens it with focus and turns the automatic opening on again. A check that arrives
+// opens it without focus, on the Last prompt tab, unless the user hid it by hand.
+async function openPane($: EngineInterface, isAutomatic = false) {
+  if (!isAutomatic) await update($, manualHide, () => false)
   await update($, isOpen, () => true)
-  await $.ui.open({ id: PANE, title: '✎ Grammar', focus: true, closeOnEscape: true })
+  await $.ui.open({ id: PANE, title: '✎ Grammar', ...(isAutomatic ? {} : { focus: true }), closeOnEscape: true })
   await loadTop($)
 }
 
 async function closePane($: EngineInterface) {
+  await update($, manualHide, () => true)
   await update($, isOpen, () => false)
   await $.ui.close({ id: PANE })
 }
 
+async function openPaneForCheck($: EngineInterface) {
+  if (await read($, manualHide) || await isPaneUp($)) return
+  await update($, tab, () => 'last')
+  await openPane($, true)
+}
+
+// The prompt of the turn in progress and what its reply has settled. 'waiting': the reply may still hold a check.
+// 'settled': a check, the does-not-apply line or a failure has been handled. 'unlikely': the reply is no check.
+type Turn = { id: string, prompt: string, timestamp: string, phase: 'waiting' | 'settled' | 'unlikely', saving?: Promise<void> }
+
+let turn: Turn | undefined
+// The prompt the user just submitted, until the turn it starts takes it.
+let submitted: { text: string, timestamp: string } | undefined
+
+async function settle($: EngineInterface, check: GrammarCheck | null) {
+  await update($, last, () => check)
+  await update($, pending, () => false)
+}
+
+// Saves the check of the reply with scripts/save_check.py and shows it in the band and the pane.
+async function saveCheck($: EngineInterface, current: Turn, reply: string) {
+  try {
+    const input = { turn_id: current.id, session_id: await $.session.id(), cwd: await $.session.cwd(),
+                    prompt: current.prompt, reply, timestamp: current.timestamp }
+    const stdout = await runScript($, ['save_check.py'], JSON.stringify(input))
+    const output: SaveOutput = stdout.trim() ? JSON.parse(stdout) : {}
+    const check = toCheck(output)
+    if (check) {
+      await settle($, check)
+      await openPaneForCheck($)
+    } else {
+      await update($, pending, () => false)
+      if (output.systemMessage) {
+        await update($, last, () => null)
+        $.ui.toast(output.systemMessage)
+      }
+    }
+  } catch (error) {
+    await settle($, null)
+    $.ui.toast(`Grammar tracker: failed to read the check (${String(error)})`)
+  }
+}
+
 export const register: Register = on => {
   on('ui.close', async ($, e, next) => {
-    if (e.id === PANE) await update($, isOpen, () => false)
+    if (e.id === PANE) {
+      await update($, isOpen, () => false)
+      if (e.origin.kind === 'person') await update($, manualHide, () => true)
+    }
     return next(e)
   })
 
-  // At the end of each main-loop turn, saves the check with the tracker's stop hook and keeps it for the band and pane.
-  // A turn without a check clears it, so the band and pane never show the check of an older prompt.
+  on('prompt.submit', async ($, e, next) => {
+    if (!e.isMeta && !e.command && e.turnId === undefined && e.text.trim()) {
+      submitted = { text: e.text, timestamp: new Date(await $.clock.now()).toISOString() }
+    }
+    return next(e)
+  })
+
+  // A main-loop turn that starts with a submitted prompt waits for its check: the band says so and the pane dims the
+  // check before.
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      const prompt = submitted
+      submitted = undefined
+      turn = prompt ? { id: e.turnId, prompt: prompt.text, timestamp: prompt.timestamp, phase: 'waiting' } : undefined
+      if (turn) await update($, pending, () => true)
+    }
+    return next(e)
+  })
+
+  // Watches the streamed reply of the main loop and passes every chunk on unchanged. The check is saved when its
+  // grammar-json block closes, and shown when the does-not-apply line is in, while the rest of the reply streams.
+  on('turn.step', async function* ($, e, next) {
+    const current = turn
+    if (e.agentId !== undefined || current?.id !== e.turnId || current.phase !== 'waiting') return yield* next(e)
+    let text = ''
+    const stream = next(e)
+    for await (const chunk of stream) {
+      yield chunk
+      if (chunk.kind !== 'text' || current.phase !== 'waiting') continue
+      text += chunk.text
+      const state = checkState(text)
+      if (state === 'check') {
+        current.phase = 'settled'
+        current.saving = saveCheck($, current, text)
+      } else if (state === 'not-apply') {
+        current.phase = 'settled'
+        await settle($, { doesNotApply: true })
+      } else if (state === 'unlikely') {
+        current.phase = 'unlikely'
+      }
+    }
+    await current.saving
+    return await stream.result
+  })
+
+  // At the end of each main-loop turn, a turn whose check did not arrive (interrupted reply, no block) leaves the band
+  // with no check, so the band and pane never show the check of an older prompt. The Top mistakes tab is refreshed.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    if (e.agentId !== undefined || e.reason !== 'answer') return result
-    try {
-      const input = { session_id: await $.session.id(), cwd: await $.session.cwd(), last_assistant_message: e.answer }
-      const stdout = await runScript($, ['stop_hook.py'], JSON.stringify(input))
-      const output: StopHookOutput = stdout.trim() ? JSON.parse(stdout) : {}
-      const check = toCheck(output)
-      await update($, last, () => check)
-      if (!check && output.systemMessage) $.ui.toast(output.systemMessage)
-      if (await isPaneUp($)) await refreshTop($)
-    } catch (error) {
-      await update($, last, () => null)
-      $.ui.toast(`Grammar tracker: failed to read the check (${String(error)})`)
-    }
+    const current = turn
+    if (e.agentId !== undefined || current?.id !== e.turnId) return result
+    turn = undefined
+    await current.saving
+    if (current.phase !== 'settled') await settle($, null)
+    if (await isPaneUp($)) await refreshTop($)
     return result
   })
 
@@ -223,6 +329,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const check = await read($, last)
+    const isPending = await read($, pending)
     if (e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     // isOpen redraws the band when the pane opens or closes.
@@ -231,7 +338,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {await next(e)}
         <Box>
-          <Text dimColor>{check === null ? NO_CHECK_LINE : bandLine(check)}   </Text>
+          <Text dimColor>{isPending ? CHECKING_LINE : check === null ? NO_CHECK_LINE : bandLine(check)}   </Text>
           <Button key="toggle" hotkey="g" plain onPress={() => (shown ? closePane($) : openPane($))}>
             {shown ? 'Hide' : 'Show'}
           </Button>
@@ -244,6 +351,7 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const width = e.props.bodyColumns
     const check = await read($, last)
+    const isPending = await read($, pending)
     const current: PaneTab = await read($, tab)
     const tabButton = (id: PaneTab, label: string) => (
       <Button key={`tab-${id}`} plain onPress={() => showTab($, id)}>
@@ -285,25 +393,27 @@ export const register: Register = on => {
       </Box>
     )
     const fitsBorder = (title: string, cardWidth: number) => title.length + 2 <= cardWidth - 4
-    const sentences = (o: Occurrence) => [
-      <Text key="original" color="error">✗ {o.original}</Text>,
-      <Text key="corrected" color="success">✓ {o.corrected}</Text>,
-      ...(o.reason ? [<Text key="reason">{o.reason}</Text>] : []),
+    const sentences = (o: Occurrence, isDim = false) => [
+      <Text key="original" color={isDim ? undefined : 'error'} dimColor={isDim}>✗ {o.original}</Text>,
+      <Text key="corrected" color={isDim ? undefined : 'success'} dimColor={isDim}>✓ {o.corrected}</Text>,
+      ...(o.reason ? [<Text key="reason" dimColor={isDim}>{o.reason}</Text>] : []),
     ]
     const example = (o: Occurrence) => (o.typeExample ? `Example: ${o.typeExample}` : '')
 
-    const lastTab = (check: GrammarCheck & { doesNotApply: false }) => (
+    // A check shown dimmed is the one before, while the reply to the next prompt is still being checked.
+    const lastTab = (check: GrammarCheck & { doesNotApply: false }, isDim = false) => (
       <Box flexDirection="column">
-        {check.occurrences.length === 0 ? <Text color="success">✓ No mistakes</Text> : null}
+        {check.occurrences.length === 0 ? <Text color={isDim ? undefined : 'success'} dimColor={isDim}>✓ No mistakes</Text> : null}
         {check.occurrences.map((o, n) => {
           const title = `${n + 1} · ${capitalize(o.typeLabel)} · "${o.identifier}" ×${o.count}${o.isRecurring ? ' ⟳' : ''}`
           const rule = `${o.typeDescription}${o.typeExample ? ` (${o.typeExample})` : ''}`
-          return card(`o${n}`, title, width, o.isRecurring ? 'warning' : 'inactive', [
-            ...sentences(o),
+          return card(`o${n}`, title, width, o.isRecurring && !isDim ? 'warning' : 'inactive', [
+            ...sentences(o, isDim),
             <Text key="rule" dimColor>{rule}</Text>,
           ])
         })}
-        {card('corrected', 'Corrected prompt', width, 'suggestion', [<Text key="text">{check.correctedPrompt}</Text>])}
+        {card('corrected', 'Corrected prompt', width, isDim ? 'inactive' : 'suggestion',
+              [<Text key="text" dimColor={isDim}>{check.correctedPrompt}</Text>])}
       </Box>
     )
 
@@ -368,6 +478,11 @@ export const register: Register = on => {
           ) : (
             await topTab(topMistakes.mistakes)
           )
+        ) : isPending ? (
+          <Box flexDirection="column">
+            <Text color={ACCENT}>{CHECKING_PANE}</Text>
+            {check === null || check.doesNotApply ? null : lastTab(check, true)}
+          </Box>
         ) : check === null ? (
           <Text dimColor>No grammar check for the last prompt.</Text>
         ) : check.doesNotApply ? (

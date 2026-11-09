@@ -56,20 +56,23 @@ Start the prompt with `Claude, do not grammar check` (or `don't grammar check`, 
    text about the check. The block holds the input mode (typed or dictated), the corrected prompt, and one entry per
    mistake with its type, identifier, original sentence, corrected sentence and a short reason. The instruction lists
    the active types from the `mistake_types` table.
-2. At the end of each turn, the mod's hooks module (`hooks/register.tsx`) runs `scripts/stop_hook.py` with the session
-   id and Claude's last reply.
-3. `stop_hook.py` reads the `grammar-json` block, saves it to SQLite (`grammar.db`), and prints the corrected prompt
-   and each mistake with its reason and counter.
-4. The mod keeps that check for the band and the pane, and hides the grammar check from the reply on screen. The stored
-   reply keeps it (ctrl+o shows it).
+2. The mod's hooks module (`hooks/register.tsx`) watches the streamed reply of the main loop. When the `grammar-json`
+   block closes, it runs `scripts/save_check.py` with the turn id, the conversation id, the folder, the prompt, the
+   reply so far and the time the prompt was sent. It does not wait for the end of the reply.
+3. `save_check.py` reads the `grammar-json` block, saves it to SQLite (`grammar.db`), and prints the corrected prompt
+   and each mistake with its reason and counter. The turn id is the key of the saved prompt, so a check is saved once.
+4. The band and the pane show the check at once, while the answer still streams. The mod hides the grammar check from
+   the reply on screen. The stored reply keeps it (ctrl+o shows it).
+5. `prompt_uuid`, the id of the prompt in the transcript, is stored later by `query.py rekey`, which runs at the start
+   of each save.
 
 ```
-prompt ──> prompt_hook.py ──> Claude's reply: label + grammar-json block + answer
+prompt ──> prompt_hook.py ──> Claude's reply streams: label + grammar-json block + answer
                                      │
-              turn ends ──> mod ──> stop_hook.py ──> grammar.db
+          block closes ──> mod ──> save_check.py ──> grammar.db
                                      │
-                       band "Grammar: 3 mistakes, 1 recurring   g: Show"
-                                     │ click Show, or ctrl+x tab then g
+                       band "Grammar: 3 mistakes, 1 recurring   g: Hide"
+                                     │ the pane opens, or click Show, or ctrl+x tab then g
                        pane: Last prompt | Top mistakes (query.py top)
 ```
 
@@ -93,20 +96,27 @@ The `mistake_types` table in the database holds the types of mistake. Its column
 
 ## Band and pane
 
-- The band above the prompt shows one line for the last prompt: `Grammar: 3 mistakes, 1 recurring   g: Show`,
-  `Grammar check does not apply to the last prompt`, or `Grammar: no check for the last prompt` (a new session, a
-  skipped check, or a failed one). Its `Show` button is always there, so the **Top mistakes** tab is always reachable.
+- The band above the prompt shows one line for the last prompt: `Grammar: checking…` while the reply streams,
+  `Grammar: 3 mistakes, 1 recurring   g: Show` once the check block closes (the pane may be closed),
+  `Grammar check does not apply to the last prompt` as soon as that line streams, or
+  `Grammar: no check for the last prompt` (a new conversation, an interrupted reply, a reply without a check block, or
+  a failed save). Its `Show` button is always there, so the **Top mistakes** tab is always reachable.
 - A mistake is recurring when its counter, across all prompts, reaches `RECURRING_THRESHOLD = 3`
   (`scripts/lib/config.py`).
 - Open the `✎ Grammar` pane with a click on `Show` (fullscreen terminal) or with `ctrl+x tab` then `g`. Close it with
-  `Hide` in the band or the pane, with `g` while the band has the focus, or with `h` or Esc in the pane. It is closed by
-  default and stays open across replies.
+  `Hide` in the band or the pane, with `g` while the band has the focus, or with `h` or Esc in the pane. It stays open
+  across replies.
+- The pane opens by itself, without taking the focus and on the **Last prompt** tab, when a saved check arrives. It does
+  not open for a check that does not apply, a skipped, interrupted or failed check, or after you hid it by hand. `Show`
+  opens it again with the focus and turns the automatic opening back on. An open pane keeps its tab and refreshes. A
+  pane the mod opens unasked is held back below 144 columns (110 once you opened it by hand); the band stays the signal.
 - Claude Code places the pane: a sidebar on the right in the fullscreen layout at 110 columns or more, otherwise a box
   above the prompt.
 - The pane's top row switches between its two tabs; the shown one has a colored background. Its last row holds the
   keys, `t: Tab` and `h: Hide`, under a line, and both stay at the bottom while the pane scrolls. `t` switches the tab while the pane
   has the focus.
-- **Last prompt** tab: one card per mistake. The card's border shows the number, type, identifier and counter
+- **Last prompt** tab: while the reply streams, the tab shows `⠋ Checking this prompt…` and the check before, dimmed.
+  Then one card per mistake. The card's border shows the number, type, identifier and counter
   (`1 · Word choice · "looks like" ×3 ⟳`). Inside are the original sentence in red (`✗`), the corrected sentence in
   green (`✓`), Claude's reason, and the type's description and example, dimmed. Recurring mistakes have a yellow
   border and `⟳`. The corrected prompt is in its own card at the end.
@@ -117,7 +127,7 @@ The `mistake_types` table in the database holds the types of mistake. Its column
   is open at a time. The card's
   border shows the type's description (cut with `…` when the border is too short, and then repeated in full inside).
   Inside are the type's example and the most recent original sentence, corrected sentence and reason.
-- Failures go to `errors.log` next to the database and never block Claude Code. A failure of the stop hook or of the
+- Failures go to `errors.log` next to the database and never block Claude Code. A failure of the save or of the
   pane's query also shows a toast; a failure of the prompt hook shows nothing.
 - When the data folder cannot be created or written (for example, a `CLAUDE_CONFIG_DIR` without write access), the
   hooks and the pane show `Grammar tracker: cannot write to the data folder <path>` instead.
@@ -125,10 +135,15 @@ The `mistake_types` table in the database holds the types of mistake. Its column
 ## Query
 
 `top` prints the mistakes you make most often as a JSON list, each with its counter and its latest example, with the
-fields of the stop hook's `occurrences`. The optional `N` sets how many (default 10). The pane uses it.
+fields of `save_check.py`'s `occurrences`. The optional `N` sets how many (default 10). The pane uses it.
+
+`rekey` stores the transcript uuid of each saved prompt that has none: it finds the user entry of the conversation's
+transcript with the same text and the closest time. It prints the number of prompts that got a uuid. Prompts with no
+match stay as they are, and a later run tries them again.
 
 ```
 python3 scripts/query.py top [N]
+python3 scripts/query.py rekey
 ```
 
 Run it from the mod's folder. It reads the data folder described in [Data folder](#data-folder); set
@@ -139,12 +154,12 @@ Run it from the mod's folder. It reads the data folder described in [Data folder
 | Path | Purpose |
 |---|---|
 | `scripts/prompt_hook.py` | `UserPromptSubmit` hook: grammar check instruction |
-| `scripts/stop_hook.py` | Saves the reply's `grammar-json` block and prints the check with its counters |
-| `scripts/query.py` | Command line query on the database (`top`) |
-| `scripts/lib/` | Configuration, error log, instruction text, transcript parsing, database, report formatting |
+| `scripts/save_check.py` | Saves the reply's `grammar-json` block and prints the check with its counters |
+| `scripts/query.py` | Command line query on the database (`top`, `rekey`) |
+| `scripts/lib/` | Configuration, error log, instruction text, transcript parsing, re-keying, database, report formatting |
 | `.claude-plugin/plugin.json` | Mod manifest |
 | `hooks/hooks.json` | Names the hooks module and the `UserPromptSubmit` command hook |
-| `hooks/register.tsx` | Hooks module: runs `stop_hook.py`, draws the band and the pane, hides the check from the reply |
+| `hooks/register.tsx` | Hooks module: watches the streamed reply, runs `save_check.py`, draws the band and the pane, hides the check from the reply |
 | `hooks/register.test.ts` | Tests of the hooks module (`claude plugin test`) |
 | `tsconfig.json` | TypeScript settings for the type check |
 | `types/index.d.ts` | Type contract of the mod's `$.state` values |

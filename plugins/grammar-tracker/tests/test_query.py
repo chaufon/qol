@@ -25,7 +25,7 @@ def test_top_on_empty_database(tmp_path):
 def test_top_marks_recurring_mistakes(tmp_path):
     conn = connect(tmp_path / "grammar.db")
     for n in range(3):
-        save_check(conn, prompt_uuid=f"p{n}", session_id="s", created_at="2026-10-18T12:00:00Z", project_dir="/p",
+        save_check(conn, turn_id=f"p{n}", session_id="s", created_at="2026-10-18T12:00:00Z", project_dir="/p",
                    original="o", check=Check(input_mode="typed", corrected_prompt="c", mistakes=[
                        Mistake(type="article", identifier="the", original="now related.", corrected="now the related.")]))
     conn.close()
@@ -41,7 +41,7 @@ def test_top_on_newer_database_exits_with_the_reason_alone(tmp_path):
     result = subprocess.run([sys.executable, str(ROOT / "scripts" / "query.py"), "top"], capture_output=True, text=True,
                             env=script_env(tmp_path, CLAUDE_PLUGIN_DATA=str(tmp_path)), cwd=tmp_path)
     assert result.returncode == 1
-    assert result.stderr.strip() == ("grammar.db is at version 99, and this grammar tracker reads version 3 or older."
+    assert result.stderr.strip() == ("grammar.db is at version 99, and this grammar tracker reads version 4 or older."
                                      " Update the grammar-tracker mod.")
 
 

@@ -15,11 +15,10 @@ NON_PROMPT_PREFIXES = ("<task-notification>", "<command-", "<local-command")
 
 
 @dataclass
-class Turn:
-    prompt_uuid: str
-    prompt: str
+class Prompt:
+    uuid: str
+    text: str
     timestamp: str
-    reply: str
 
 
 @dataclass
@@ -57,21 +56,15 @@ def find_transcript(session_id, projects_dir=CLAUDE_DIR / "projects"):
     return next(Path(projects_dir).glob(f"*/{session_id}.jsonl"), None)
 
 
-def last_turn(path):
-    """Return the last user prompt in the transcript and all assistant text written after it."""
-    turn = None
-    replies = []
+def user_prompts(path):
+    """Return the user-written prompts of the transcript in file order."""
+    prompts = []
     for line in Path(path).read_text().splitlines():
         entry = json.loads(line)
-        prompt = _prompt_text(entry)
-        if prompt is not None:
-            turn = Turn(entry["uuid"], prompt, entry.get("timestamp", ""), "")
-            replies = []
-        elif turn and entry.get("type") == "assistant":
-            replies += [block["text"] for block in entry["message"].get("content", []) if block.get("type") == "text"]
-    if turn:
-        turn.reply = "\n".join(replies)
-    return turn
+        text = _prompt_text(entry)
+        if text is not None:
+            prompts.append(Prompt(entry["uuid"], text, entry.get("timestamp", "")))
+    return prompts
 
 
 def does_not_apply(reply):

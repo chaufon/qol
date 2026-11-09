@@ -9,7 +9,7 @@ OLD_PYTHON = "import runpy, sys; sys.version_info = (3, 9, 6); sys.argv = sys.ar
              "runpy.run_path(sys.argv[0], run_name='__main__')"
 
 
-@pytest.mark.parametrize("script, args", [("prompt_hook.py", []), ("stop_hook.py", []), ("query.py", ["top"])])
+@pytest.mark.parametrize("script, args", [("prompt_hook.py", []), ("save_check.py", []), ("query.py", ["top"]), ("query.py", ["rekey"])])
 def test_script_on_old_python_logs_and_exits_with_the_version(tmp_path, script, args):
     result = subprocess.run([sys.executable, "-c", OLD_PYTHON, str(ROOT / "scripts" / script), *args], input="{}",
                             capture_output=True, text=True, check=False, cwd=ROOT / "scripts",

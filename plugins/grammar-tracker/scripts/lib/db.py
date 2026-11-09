@@ -2,17 +2,21 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+# turn_id is the engine's key for the turn and the dedupe key. prompt_uuid is the prompt's uuid in the transcript,
+# empty until `query.py rekey` finds it.
+PROMPTS_DDL = """CREATE TABLE {name} (
+    id INTEGER PRIMARY KEY,
+    turn_id TEXT UNIQUE,
+    prompt_uuid TEXT UNIQUE,
+    session_id TEXT,
+    created_at TEXT NOT NULL,
+    project_dir TEXT,
+    input_mode TEXT CHECK (input_mode IN ('typed', 'dictated')),
+    original TEXT NOT NULL,
+    corrected TEXT NOT NULL
+)"""
 SCHEMA = (
-    """CREATE TABLE IF NOT EXISTS prompts (
-        id INTEGER PRIMARY KEY,
-        prompt_uuid TEXT NOT NULL UNIQUE,
-        session_id TEXT,
-        created_at TEXT NOT NULL,
-        project_dir TEXT,
-        input_mode TEXT CHECK (input_mode IN ('typed', 'dictated')),
-        original TEXT NOT NULL,
-        corrected TEXT NOT NULL
-    )""",
+    PROMPTS_DDL.format(name="IF NOT EXISTS prompts"),
     """CREATE TABLE IF NOT EXISTS mistake_types (
         key TEXT PRIMARY KEY,
         label TEXT NOT NULL,
@@ -97,7 +101,7 @@ SEED = (
     ("other", "other", "Any mistake that fits none of the types above.", None,
      "a short description of the mistake"),
 )
-VERSION = 3
+VERSION = 4
 # Types that version 2 adds, and the word_choice text of version 1 that version 2 rewrites.
 ADDED_IN_2 = ("false_friend", "countability", "missing_subject", "verb_pattern", "question_form")
 WORD_CHOICE_1 = ("A real English word that does not mean what you meant, false friends included.",
@@ -172,6 +176,7 @@ def _migrate(conn):
         if version == 1:
             _add_types_of_2(conn)
         _add_reason(conn)
+        _add_turn_id(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchall():
             raise sqlite3.IntegrityError("foreign key check failed after migration")
         conn.execute(f"PRAGMA user_version = {VERSION}")
@@ -224,6 +229,20 @@ def _add_reason(conn):
         conn.execute("ALTER TABLE occurrences ADD COLUMN reason TEXT")
 
 
+def _add_turn_id(conn):
+    """Rebuild prompts of versions before 4 with the turn_id column and a nullable prompt_uuid. Rows keep their ids,
+    so occurrences stay linked, and their prompt_uuid."""
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(prompts)")]
+    if "turn_id" in columns:
+        return
+    conn.execute(PROMPTS_DDL.format(name="prompts_new"))
+    conn.execute("INSERT INTO prompts_new (id, prompt_uuid, session_id, created_at, project_dir, input_mode, original,"
+                 " corrected) SELECT id, prompt_uuid, session_id, created_at, project_dir, input_mode, original,"
+                 " corrected FROM prompts")
+    conn.execute("DROP TABLE prompts")
+    conn.execute("ALTER TABLE prompts_new RENAME TO prompts")
+
+
 def _types(conn, where=""):
     rows = conn.execute(f"SELECT key, label, description, example, identifier_rule, position, deleted_at"
                         f" FROM mistake_types {where} ORDER BY position").fetchall()
@@ -238,14 +257,14 @@ def all_types(conn):
     return _types(conn)
 
 
-def save_check(conn, *, prompt_uuid, session_id, created_at, project_dir, original, check):
+def save_check(conn, *, turn_id, session_id, created_at, project_dir, original, check, prompt_uuid=None):
     """Save a prompt and its mistakes. Return the saved occurrences with their total counts,
-    or None when the prompt is already saved."""
+    or None when the turn is already saved."""
     with conn:
         cursor = conn.execute(
-            "INSERT OR IGNORE INTO prompts (prompt_uuid, session_id, created_at, project_dir, input_mode, original,"
-            " corrected) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (prompt_uuid, session_id, created_at, project_dir, check.input_mode, original, check.corrected_prompt),
+            "INSERT OR IGNORE INTO prompts (turn_id, prompt_uuid, session_id, created_at, project_dir, input_mode,"
+            " original, corrected) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (turn_id, prompt_uuid, session_id, created_at, project_dir, check.input_mode, original, check.corrected_prompt),
         )
         if cursor.rowcount == 0:
             return None

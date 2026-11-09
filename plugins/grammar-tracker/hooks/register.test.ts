@@ -2,10 +2,10 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { bandLine, cell, countColumn, mistakeColumn, stripCheck, toCheck } from './register'
+import { bandLine, cell, checkState, countColumn, mistakeColumn, stripCheck, toCheck } from './register'
 
 
-const STOP_OUTPUT = {
+const SAVE_OUTPUT = {
   corrected_prompt: 'What files does the mod folder have?',
   occurrences: [
     { type: 'article', type_label: 'article', identifier: 'the', original: 'a', corrected: 'b',
@@ -30,9 +30,13 @@ const PANE_PROPS = {
   title: 'Grammar', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 10 }, view: {},
 } as const
 
+const CHECK_TEXT = '**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
+const CHECK_BLOCK_END = '**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```'
+
 function engine(on: On, stdout: string) {
-  const calls = { stdout, stderr: '', exitCode: 0, top: JSON.stringify(STOP_OUTPUT.occurrences), isTopBroken: false, runs: [] as (readonly string[])[], opened: [] as string[],
-                  closed: [] as string[], toasts: [] as string[],
+  const calls = { stdout, stderr: '', exitCode: 0, top: JSON.stringify(SAVE_OUTPUT.occurrences), isTopBroken: false, runs: [] as (readonly string[])[], opened: [] as string[],
+                  focus: [] as (boolean | undefined)[], closed: [] as string[], toasts: [] as string[], inputs: [] as string[],
+                  chunks: [] as string[], gate: undefined as Promise<void> | undefined, yielded: [] as string[],
                   inits: [] as unknown[], pythons: { python3: '3' } as Record<string, string>,
                   probes: [] as string[] }
   on('process.run', ($, e) => {
@@ -48,10 +52,11 @@ function engine(on: On, stdout: string) {
     if (e.argv[2] === 'top') {
       return { value: { exitCode: 0, stdout: calls.top, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    calls.inputs.push(String((e.init as { stdin?: string } | undefined)?.stdin))
     return { value: { exitCode: calls.exitCode, stdout: calls.stdout, stderr: calls.stderr, isStdoutTruncated: false,
                       isStderrTruncated: false } }
   })
-  on('ui.open', ($, e) => { calls.opened.push(e.id); return { value: { isPlaced: true } } })
+  on('ui.open', ($, e) => { calls.opened.push(e.id); calls.focus.push(e.focus); return { value: { isPlaced: true } } })
   on('ui.close', ($, e) => { calls.closed.push(e.id); return { value: undefined } })
   on('ui.panes', () => {
     const up = calls.opened.length > calls.closed.length
@@ -60,9 +65,58 @@ function engine(on: On, stdout: string) {
   on('ui.toast', ($, e) => { calls.toasts.push(e.text); return { value: undefined } })
   on('session.id', () => ({ value: 's1' }))
   on('session.cwd', () => ({ value: '/proj' }))
+  on('clock.now', () => ({ value: Date.parse('2026-10-17T12:00:00.000Z') }))
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* ($, e) {
+    for (const text of calls.chunks) {
+      calls.yielded.push(text)
+      yield { kind: 'text', index: 0, text }
+      if (calls.gate && text === calls.chunks.at(-2)) await calls.gate
+    }
+    return { turnId: e.turnId, index: e.index, answer: calls.chunks.join(''), toolUses: [], stopReason: 'end_turn',
+             usage: null } as never
+  })
   on('turn.complete', () => ({ text: 'reply' }))
   on('ui.render', ($, e) => $.ui.resolve(e).Text({ children: 'beneath' }))
   return calls
+}
+
+type Calls = ReturnType<typeof engine>
+
+// The model streams the reply in these chunks: the prompt is submitted, the turn starts, its step streams.
+async function stream($: Engine, calls: Calls, chunks: string[], turnId = 't1', agentId?: string) {
+  calls.chunks = chunks
+  calls.yielded = []
+  const step = $.turn.step({ turnId, index: 0, model: 'm', messageCount: 1, ...(agentId ? { agentId } : {}) })
+  const seen: string[] = []
+  for await (const chunk of step) if (chunk.kind === 'text') seen.push(chunk.text)
+  return seen
+}
+
+async function startTurn($: Engine, text = 'the people', turnId = 't1') {
+  await $.prompt.submit({ text } as never)
+  await $.turn.start({ text, turnId })
+}
+
+// One whole turn: submitted, streamed and complete.
+async function turn($: Engine, calls: Calls, chunks: string[], turnId = 't1') {
+  await startTurn($, 'the people', turnId)
+  await stream($, calls, chunks, turnId)
+  await $.turn.complete({ ...TURN, turnId })
+}
+
+declare const setTimeout: (callback: (value?: unknown) => void, ms: number) => unknown
+
+async function until(done: () => Promise<boolean> | boolean) {
+  for (let n = 0; n < 200 && !(await done()); n++) await new Promise(resolve => setTimeout(resolve, 0))
+}
+
+async function bandHas($: Engine, text: string | RegExp, surface: 'terminal' | 'desktop' = 'terminal') {
+  const band = await $.ui.mount({ ...BAND, requestId: 'probe', surface })
+  const found = (await band.find({ text })) !== undefined
+  await band.unmount()
+  return found
 }
 
 // Draws the band and presses its Show button, as a click or ctrl+x tab then g does.
@@ -96,10 +150,10 @@ test('stripCheck leaves other text unchanged', () => {
   expect(stripCheck('**English grammar check:** no block')).toBe('**English grammar check:** no block')
 })
 
-test('toCheck and bandLine summarize the stop hook output', () => {
-  expect(bandLine(toCheck(STOP_OUTPUT)!)).toBe('Grammar: 2 mistakes, 1 recurring')
+test('toCheck and bandLine summarize the output of save_check.py', () => {
+  expect(bandLine(toCheck(SAVE_OUTPUT)!)).toBe('Grammar: 2 mistakes, 1 recurring')
   expect(bandLine(toCheck({ does_not_apply: true })!)).toBe('Grammar check does not apply to the last prompt')
-  expect(bandLine(toCheck({ ...STOP_OUTPUT, occurrences: [] })!)).toBe('Grammar: no mistakes')
+  expect(bandLine(toCheck({ ...SAVE_OUTPUT, occurrences: [] })!)).toBe('Grammar: no mistakes')
   expect(toCheck({ systemMessage: 'Grammar tracker: failed to log (see errors.log)' })).toBe(null)
 })
 
@@ -118,77 +172,197 @@ test('the reply drawn has no check in its first block only', async ($, on) => {
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`the band shows the last check and its button opens the pane (${surface})`, async ($, on) => {
-    const calls = engine(on, JSON.stringify(STOP_OUTPUT))
-    await $.turn.complete(TURN)
-    expect(calls.runs[0]?.[1]?.endsWith('/grammar-tracker/scripts/stop_hook.py')).toBe(true)
-    const band = await $.ui.mount({ ...BAND, surface })
-    expect(await band.find({ text: 'Grammar: 2 mistakes, 1 recurring' })).toBeDefined()
-    await $.ui.press({ plugin: 'grammar-tracker', key: 'toggle' })
+  test(`a closed check block is saved at once, then the band shows it and the pane opens (${surface})`, async ($, on) => {
+    const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+    await turn($, calls, [CHECK_TEXT])
+    expect(calls.runs[0]?.[1]?.endsWith('/grammar-tracker/scripts/save_check.py')).toBe(true)
+    expect(JSON.parse(calls.inputs[0]!)).toEqual({ turn_id: 't1', session_id: 's1', cwd: '/proj', prompt: 'the people',
+                                                   reply: CHECK_TEXT, timestamp: '2026-10-17T12:00:00.000Z' })
+    expect(await bandHas($, 'Grammar: 2 mistakes, 1 recurring', surface)).toBe(true)
     expect(calls.opened).toEqual(['grammar'])
-    expect(calls.runs.at(-1)?.[2]).toBe('top')
+    expect(await bandHas($, 'Hide', surface)).toBe(true)
   })
 }
 
-test('the band says when the check does not apply', async ($, on) => {
-  engine(on, JSON.stringify({ does_not_apply: true }))
+test('the check is saved and shown while the rest of the reply still streams', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  let release = () => {}
+  calls.gate = new Promise(resolve => { release = resolve })
+  await startTurn($)
+  const done = stream($, calls, ['**English grammar check:**\n```grammar-', 'json\n{"mistakes": []}\n```', '\n\nThe answer'])
+  await until(async () => await bandHas($, 'Grammar: 2 mistakes, 1 recurring'))
+  expect(await bandHas($, 'Grammar: 2 mistakes, 1 recurring')).toBe(true)
+  expect(calls.opened).toEqual(['grammar'])
+  expect(calls.focus).toEqual([undefined])
+  release()
+  await done
   await $.turn.complete(TURN)
-  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await band.find({ text: 'Grammar check does not apply to the last prompt' })).toBeDefined()
+  expect(await bandHas($, 'Grammar: 2 mistakes, 1 recurring')).toBe(true)
+  expect(calls.runs.filter(argv => argv[1]?.endsWith('save_check.py'))).toHaveLength(1)
 })
 
-test('a failed stop hook shows a toast and a band with no check', async ($, on) => {
+test('the chunks of the reply pass on unchanged', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await startTurn($)
+  const chunks = ['**English grammar check:**\n```grammar-json\n{"mis', 'takes": []}\n```\n\n', 'The answer.']
+  expect(await stream($, calls, chunks)).toEqual(chunks)
+})
+
+test('the band says checking and the pane dims the check before while the reply streams', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  await startTurn($, 'next prompt', 't2')
+  expect(await bandHas($, 'Grammar: checking…')).toBe(true)
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: '⠋ Checking this prompt…' })).toBeDefined()
+  const dimmed = (await pane.findAll({ type: 'Text' })).find(t => t.text === '✗ c')
+  expect(dimmed?.props.dimColor).toBe(true)
+  expect(dimmed?.props.color).toBeUndefined()
+})
+
+test('the pane shows only the checking line while the first prompt is checked', async ($, on) => {
+  engine(on, '')
+  await startTurn($)
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: '⠋ Checking this prompt…' })).toBeDefined()
+  expect(await pane.find({ text: /No grammar check/ })).toBeUndefined()
+})
+
+test('a check that arrives keeps the tab of a pane already open and refreshes it', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await pressBand($)
+  const pane = await $.ui.mount(PANE)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
+  await turn($, calls, [CHECK_TEXT])
+  expect(calls.opened).toEqual(['grammar'])
+  expect(await pane.find({ text: /Malformed tense/ })).toBeDefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-next' })
+  await pane.redraw()
+  expect(await pane.find({ text: ' 1 · Article · "the" ×1 ' })).toBeDefined()
+})
+
+test('a check opens the pane on the Last prompt tab, without focus', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  expect(calls.focus).toEqual([undefined])
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: ' 1 · Article · "the" ×1 ' })).toBeDefined()
+})
+
+test('a pane the user hid is not opened by a check until the Show button opens it again', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'toggle' })
+  expect(calls.closed).toEqual(['grammar'])
+  await turn($, calls, [CHECK_TEXT], 't2')
+  expect(calls.opened).toEqual(['grammar'])
+  expect(await bandHas($, 'Grammar: 2 mistakes, 1 recurring')).toBe(true)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'toggle' })
+  expect(calls.opened).toEqual(['grammar', 'grammar'])
+  expect(calls.focus).toEqual([undefined, true])
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'toggle' })
+  await turn($, calls, [CHECK_TEXT], 't3')
+  expect(calls.opened).toEqual(['grammar', 'grammar'])
+})
+
+test('the does-not-apply line shows in the band as it streams and does not open the pane', async ($, on) => {
+  const calls = engine(on, '')
+  await startTurn($)
+  await stream($, calls, ['English grammar check does not apply.', '\n\nDone.'])
+  expect(await bandHas($, 'Grammar check does not apply to the last prompt')).toBe(true)
+  await $.turn.complete(TURN)
+  expect(await bandHas($, 'Grammar check does not apply to the last prompt')).toBe(true)
+  expect(calls.opened).toEqual([])
+  expect(calls.runs).toEqual([])
+})
+
+test('a labeled does-not-apply line shows in the band', async ($, on) => {
+  const calls = engine(on, '')
+  await turn($, calls, ['**English grammar check:** ', 'English grammar check does not apply.\n\nDone.'])
+  expect(await bandHas($, 'Grammar check does not apply to the last prompt')).toBe(true)
+})
+
+test('a failed save shows a toast and a band with no check', async ($, on) => {
   const calls = engine(on, JSON.stringify({ systemMessage: 'Grammar tracker: failed to log (see errors.log)' }))
-  await $.turn.complete(TURN)
-  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await band.find({ text: 'Grammar: no check for the last prompt' })).toBeDefined()
+  await turn($, calls, [CHECK_TEXT])
+  expect(await bandHas($, 'Grammar: no check for the last prompt')).toBe(true)
   expect(calls.toasts).toEqual(['Grammar tracker: failed to log (see errors.log)'])
+  expect(calls.opened).toEqual([])
 })
 
-test('a stop hook that exits with an error shows its message in a toast', async ($, on) => {
-  const calls = engine(on, JSON.stringify(STOP_OUTPUT))
-  await $.turn.complete(TURN)
+test('a script that exits with an error shows its message in a toast and clears the check', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
   calls.stdout = ''
   calls.exitCode = 1
   calls.stderr = 'Grammar tracker needs Python 3.10 or newer, found 3.9.6\n'
-  await $.turn.complete(TURN)
-  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await band.find({ text: 'Grammar: no check for the last prompt' })).toBeDefined()
+  await turn($, calls, [CHECK_TEXT], 't2')
+  expect(await bandHas($, 'Grammar: no check for the last prompt')).toBe(true)
   expect(calls.toasts).toEqual(
     ['Grammar tracker: failed to read the check (Error: Grammar tracker needs Python 3.10 or newer, found 3.9.6)'])
 })
 
-test('a turn without a check leaves the band with no check', async ($, on) => {
-  const calls = engine(on, JSON.stringify(STOP_OUTPUT))
-  await $.turn.complete(TURN)
-  calls.stdout = ''
-  await $.turn.complete(TURN)
-  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await band.find({ text: /mistakes/ })).toBeUndefined()
-  expect(await band.find({ text: 'Grammar: no check for the last prompt' })).toBeDefined()
+test('a turn without a check clears the check of the turn before', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  await turn($, calls, ['Done.'], 't2')
+  expect(await bandHas($, /mistakes/)).toBe(false)
+  expect(await bandHas($, 'Grammar: no check for the last prompt')).toBe(true)
 })
 
-test('a failed stop hook clears the check of the turn before', async ($, on) => {
-  const calls = engine(on, JSON.stringify(STOP_OUTPUT))
-  await $.turn.complete(TURN)
-  calls.stdout = JSON.stringify({ systemMessage: 'Grammar tracker: failed to log (see errors.log)' })
-  await $.turn.complete(TURN)
-  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await band.find({ text: 'Grammar: no check for the last prompt' })).toBeDefined()
+test('an interrupted reply clears the check and does not open the pane', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await startTurn($)
+  await stream($, calls, ['**English grammar check:**\n```grammar-json\n{"mist'])
+  expect(await bandHas($, 'Grammar: checking…')).toBe(true)
+  await $.turn.complete({ ...TURN, reason: 'interrupted', isAborted: true } as never)
+  expect(await bandHas($, 'Grammar: no check for the last prompt')).toBe(true)
+  expect(calls.opened).toEqual([])
+  expect(calls.runs).toEqual([])
+})
+
+test('a check block that is not at the start of the reply is not saved', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, ['The block looks like this:\n```grammar-json\n{"mistakes": []}\n```\n'])
+  expect(calls.runs).toEqual([])
+  expect(await bandHas($, 'Grammar: no check for the last prompt')).toBe(true)
+})
+
+test('checkState follows the start of the reply', () => {
+  expect(checkState('')).toBe('waiting')
+  expect(checkState('**English gram')).toBe('waiting')
+  expect(checkState('**English grammar check:**\n```grammar-js')).toBe('waiting')
+  expect(checkState('**English grammar check:**\n```grammar-json\n{"mistakes": [')).toBe('waiting')
+  expect(checkState('**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```')).toBe('check')
+  expect(checkState('```grammar-json\n{}\n```\nMore')).toBe('check')
+  expect(checkState('\nEnglish grammar check does not apply.')).toBe('not-apply')
+  expect(checkState('**English grammar check:** English grammar check does not apply')).toBe('not-apply')
+  expect(checkState('Here is the answer')).toBe('unlikely')
 })
 
 test('the scripts run without a data folder from the mod', async ($, on) => {
-  const calls = engine(on, JSON.stringify(STOP_OUTPUT))
-  await $.turn.complete(TURN)
-  await pressBand($)
-  expect(calls.runs.map(argv => argv[2])).toEqual([undefined, 'top'])
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  expect(calls.runs.map(argv => argv[2])).toEqual([undefined, 'top', 'top'])
   expect(calls.inits.every(init => (init as { env?: unknown } | undefined)?.env === undefined)).toBe(true)
 })
 
 test('skips subagent turns', async ($, on) => {
-  const calls = engine(on, JSON.stringify(STOP_OUTPUT))
-  await $.turn.complete({ ...TURN, agentId: 'a1' })
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await $.turn.start({ text: 'sub task', turnId: 'a-t', agentId: 'a1' })
+  await stream($, calls, [CHECK_TEXT], 'a-t', 'a1')
+  await $.turn.complete({ ...TURN, turnId: 'a-t', agentId: 'a1' })
   expect(calls.runs).toEqual([])
+  expect(await bandHas($, 'Grammar: no check for the last prompt')).toBe(true)
+})
+
+test('a turn that starts without a submitted prompt is not tracked', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await $.turn.start({ text: 'notification', turnId: 't1' })
+  await stream($, calls, [CHECK_TEXT])
+  expect(calls.runs).toEqual([])
+  expect(await bandHas($, 'Grammar: checking…')).toBe(false)
 })
 
 
@@ -218,8 +392,8 @@ const PANE = { plugin: 'grammar-tracker', surface: 'terminal', component: 'Pane'
                props: PANE_PROPS } as const
 
 test('the Last prompt tab draws a card per mistake with its title, sentences, reason and rule', async ($, on) => {
-  engine(on, JSON.stringify(STOP_OUTPUT))
-  await $.turn.complete(TURN)
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: ' 1 · Article · "the" ×1 ' })).toBeDefined()
   expect(await pane.find({ text: ' 2 · Malformed tense · "does have" ×3 ⟳ ' })).toBeDefined()
@@ -232,22 +406,22 @@ test('the Last prompt tab draws a card per mistake with its title, sentences, re
 })
 
 test('the Last prompt tab leaves out the parentheses for an empty example', async ($, on) => {
-  const [first] = STOP_OUTPUT.occurrences
-  engine(on, JSON.stringify({ ...STOP_OUTPUT, occurrences: [{ ...first, type_example: '' }] }))
-  await $.turn.complete(TURN)
+  const [first] = SAVE_OUTPUT.occurrences
+  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [{ ...first, type_example: '' }] }))
+  await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: 'A wrong, missing or extra "a/an" or "the".' })).toBeDefined()
 })
 
 test('the Last prompt tab says when there are no mistakes', async ($, on) => {
-  engine(on, JSON.stringify({ ...STOP_OUTPUT, occurrences: [] }))
-  await $.turn.complete(TURN)
+  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
+  await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: '✓ No mistakes' })).toBeDefined()
 })
 
 test('a Top mistakes row opens and closes its example card', async ($, on) => {
-  engine(on, '')
+  const calls = engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
@@ -288,23 +462,23 @@ test('cell cuts or pads a table cell and the Count column fits its header and th
 })
 
 test('the scripts run with py -3 where python3 does not start, as on Windows', async ($, on) => {
-  const calls = engine(on, JSON.stringify(STOP_OUTPUT))
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   calls.pythons = { python3: '', py: '3' }
-  await $.turn.complete(TURN)
+  await turn($, calls, [CHECK_TEXT])
   expect(calls.probes).toEqual(['python3', 'py'])
   expect(calls.runs[0]?.slice(0, 2)).toEqual(['py', '-3'])
-  expect(calls.runs[0]?.[2]?.endsWith('/grammar-tracker/scripts/stop_hook.py')).toBe(true)
+  expect(calls.runs[0]?.[2]?.endsWith('/grammar-tracker/scripts/save_check.py')).toBe(true)
 })
 
-test('without Python 3 the stop hook says so in a toast, and a Python installed later is found', async ($, on) => {
-  const calls = engine(on, JSON.stringify(STOP_OUTPUT))
+test('without Python 3 the check says so in a toast, and a Python installed later is found', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   calls.pythons = { python: '2' }
-  await $.turn.complete(TURN)
+  await turn($, calls, [CHECK_TEXT])
   expect(calls.probes).toEqual(['python3', 'py', 'python'])
   expect(calls.runs).toEqual([])
   expect(calls.toasts[0]).toContain('Grammar tracker needs Python 3.10 or newer as python3, py or python on the PATH')
   calls.pythons = { python: '3' }
-  await $.turn.complete(TURN)
+  await turn($, calls, [CHECK_TEXT], 't2')
   expect(calls.runs[0]?.[0]).toBe('python')
 })
 
@@ -317,7 +491,7 @@ test('a Top mistakes row with the largest count fits the pane', () => {
 })
 
 test('the Top mistakes tab ends with the recurring mistakes and the sum of the counts', async ($, on) => {
-  engine(on, '')
+  const calls = engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
@@ -327,8 +501,8 @@ test('the Top mistakes tab ends with the recurring mistakes and the sum of the c
 })
 
 test('the footer keys sit on the last row the pane shows, under a line', async ($, on) => {
-  engine(on, JSON.stringify(STOP_OUTPUT))
-  await $.turn.complete(TURN)
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
   const footer = (await pane.findAll({ type: 'Box' })).find(b => b.props.position === 'absolute' && b.text.includes('Hide'))
   expect(footer?.props.top).toBe(PANE_PROPS.scroll.bodyRows - 2)
@@ -336,8 +510,8 @@ test('the footer keys sit on the last row the pane shows, under a line', async (
 })
 
 test('the footer key t switches between the tabs, and the tab on show is colored', async ($, on) => {
-  engine(on, JSON.stringify(STOP_OUTPUT))
-  await $.turn.complete(TURN)
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
   const keys = (await pane.findAll({ type: 'Button' })).filter(b => b.props.hotkey !== undefined).map(b => b.props.hotkey)
   expect(keys).toEqual(['t', 'h'])

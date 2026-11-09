@@ -2,7 +2,7 @@ import json
 import subprocess
 import sys
 
-from conftest import ROOT, assistant, block, script_env, user
+from conftest import ROOT, block, script_env, user
 from lib.db import connect
 
 
@@ -60,16 +60,16 @@ def test_script_without_claude_plugin_data_uses_the_data_folder_claude_code_give
     assert (tmp_path / "plugins" / "data" / "grammar-tracker-qol" / "grammar.db").exists()
 
 
-def stop_payload(transcript):
-    return {"session_id": "s1", "transcript_path": str(transcript), "cwd": "/proj", "hook_event_name": "Stop"}
+def save_payload(reply, turn_id="turn-1", prompt="the people"):
+    return {"turn_id": turn_id, "session_id": "s1", "cwd": "/proj", "prompt": prompt, "reply": reply,
+            "timestamp": "2026-10-17T12:00:00.000Z"}
 
 
-def test_stop_hook_saves_and_reports(tmp_path, write_transcript):
+def test_save_check_saves_and_reports(tmp_path):
     mistake = {"type": "article", "identifier": "no article", "original": "the people", "corrected": "people",
                "reason": "people in general take no article"}
     payload = {"input_mode": "typed", "corrected_prompt": "people", "mistakes": [mistake] * 3}
-    transcript = write_transcript([user("u1", "the people"), assistant("a1", block(payload))])
-    out = run("stop_hook.py", stop_payload(transcript), tmp_path)
+    out = run("save_check.py", save_payload(block(payload)), tmp_path)
     assert "systemMessage" not in out
     assert out["occurrences"][0] == {"type": "article", "type_label": "article", "identifier": "no article",
                                      "type_description": 'A wrong, missing or extra "a/an" or "the".',
@@ -78,85 +78,58 @@ def test_stop_hook_saves_and_reports(tmp_path, write_transcript):
                                      "reason": "people in general take no article", "count": 3,
                                      "is_recurring": True}
     assert len(out["occurrences"]) == 3
-    assert "summary" not in out
     assert out["corrected_prompt"] == "people"
-    assert (tmp_path / "grammar.db").exists()
-    assert run("stop_hook.py", stop_payload(transcript), tmp_path) is None
+    conn = connect(tmp_path / "grammar.db")
+    assert conn.execute("SELECT turn_id, prompt_uuid, original, created_at, project_dir FROM prompts").fetchall() == [
+        ("turn-1", None, "the people", "2026-10-17T12:00:00.000Z", "/proj")]
+    assert run("save_check.py", save_payload(block(payload)), tmp_path) is None
 
 
-def test_stop_hook_reports_check_that_does_not_apply(tmp_path, write_transcript):
-    transcript = write_transcript([user("u1", "ok"), assistant("a1", "English grammar check does not apply\n\nDone.")])
-    assert run("stop_hook.py", stop_payload(transcript), tmp_path) == {"does_not_apply": True}
+def test_save_check_reports_check_that_does_not_apply(tmp_path):
+    reply = "English grammar check does not apply\n\nDone."
+    assert run("save_check.py", save_payload(reply), tmp_path) == {"does_not_apply": True}
 
 
-def test_stop_hook_reports_labeled_check_that_does_not_apply(tmp_path, write_transcript):
+def test_save_check_reports_labeled_check_that_does_not_apply(tmp_path):
     reply = "**English grammar check:** English grammar check does not apply.\n\nDone."
-    transcript = write_transcript([user("u1", "ok"), assistant("a1", reply)])
-    assert run("stop_hook.py", stop_payload(transcript), tmp_path) == {"does_not_apply": True}
+    assert run("save_check.py", save_payload(reply), tmp_path) == {"does_not_apply": True}
 
 
-def test_stop_hook_is_silent_without_check(tmp_path, write_transcript):
-    transcript = write_transcript([user("u1", "ok"), assistant("a1", "Done.")])
-    assert run("stop_hook.py", stop_payload(transcript), tmp_path) is None
+def test_save_check_is_silent_without_check(tmp_path):
+    assert run("save_check.py", save_payload("Done."), tmp_path) is None
+    assert not (tmp_path / "grammar.db").exists()
 
 
-def test_stop_hook_logs_failure_without_blocking(tmp_path, write_transcript):
-    transcript = write_transcript([user("u1", "x"), assistant("a1", "```grammar-json\n{broken\n```")])
-    out = run("stop_hook.py", stop_payload(transcript), tmp_path)
+def test_save_check_logs_failure_without_blocking(tmp_path):
+    out = run("save_check.py", save_payload("```grammar-json\n{broken\n```"), tmp_path)
     assert out == {"systemMessage": "Grammar tracker: failed to log (see errors.log)"}
     assert "ValueError" in (tmp_path / "errors.log").read_text()
 
 
-def test_stop_hook_reads_reply_not_yet_in_transcript(tmp_path, write_transcript):
-    mistake = {"type": "article", "identifier": "the", "original": "use remote control", "corrected": "use the remote"}
-    payload = {"input_mode": "typed", "corrected_prompt": "use the remote", "mistakes": [mistake]}
-    transcript = write_transcript([user("u1", "use remote control")])
-    out = run("stop_hook.py", {**stop_payload(transcript), "last_assistant_message": block(payload)}, tmp_path)
-    assert out["occurrences"] == [{"type": "article", "type_label": "article", "identifier": "the",
-                                   "type_description": 'A wrong, missing or extra "a/an" or "the".',
-                                   "type_example": '"the people are selfish" instead of "people are selfish"',
-                                   "original": "use remote control", "corrected": "use the remote",
-                                   "reason": None, "count": 1,
-                                   "is_recurring": False}]
-
-
-def test_stop_hook_skips_transcript_without_the_last_prompt(tmp_path, write_transcript):
-    payload = {"input_mode": "typed", "corrected_prompt": "use the remote", "mistakes": []}
-    transcript = write_transcript([user("u0", "ok"), assistant("a0", "English grammar check does not apply\n\nDone.")])
-    out = run("stop_hook.py", {**stop_payload(transcript), "last_assistant_message": block(payload)}, tmp_path)
-    assert out is None
-    assert not (tmp_path / "grammar.db").exists()
-
-
-def test_stop_hook_reads_check_from_first_block_of_reply(tmp_path, write_transcript):
+def test_save_check_reports_mistake_free_prompt(tmp_path):
     payload = {"input_mode": "typed", "corrected_prompt": "fine", "mistakes": []}
-    transcript = write_transcript([user("u1", "fine"), assistant("a1", block(payload)), assistant("a2", "Last block.")])
-    out = run("stop_hook.py", {**stop_payload(transcript), "last_assistant_message": "Last block."}, tmp_path)
-    assert out["corrected_prompt"] == "fine"
-    assert out["occurrences"] == []
+    out = run("save_check.py", save_payload(block(payload), prompt="fine"), tmp_path)
+    assert out == {"corrected_prompt": "fine", "occurrences": []}
 
 
-def test_stop_hook_reports_mistake_free_prompt(tmp_path, write_transcript):
+def test_save_check_reads_check_after_progress_text_and_a_reply_still_streaming(tmp_path):
     payload = {"input_mode": "typed", "corrected_prompt": "fine", "mistakes": []}
-    transcript = write_transcript([user("u1", "fine"), assistant("a1", block(payload))])
-    out = run("stop_hook.py", stop_payload(transcript), tmp_path)
-    assert out["occurrences"] == []
+    reply = block(payload).split("\n\nRest")[0] + "\n\nStill strea"
+    assert run("save_check.py", save_payload(reply, prompt="fine"), tmp_path)["corrected_prompt"] == "fine"
 
 
-def test_stop_hook_finds_the_transcript_in_claude_config_dir(tmp_path):
+def test_save_check_stores_the_transcript_uuid_of_earlier_prompts(tmp_path):
     config_dir = tmp_path / "claude"
     transcript = config_dir / "projects" / "-home-me-project" / "s1.jsonl"
     transcript.parent.mkdir(parents=True)
-    reply = block({"input_mode": "typed", "corrected_prompt": "fine", "mistakes": []})
-    transcript.write_text("".join(json.dumps(e) + "\n" for e in [user("u1", "fine"), assistant("a1", reply)]))
-    payload = {"session_id": "s1", "cwd": "/p", "last_assistant_message": reply}
-    result = subprocess.run([sys.executable, str(ROOT / "scripts" / "stop_hook.py")], input=json.dumps(payload),
-                            capture_output=True, text=True,
-                            env=script_env(tmp_path, CLAUDE_CONFIG_DIR=str(config_dir),
-                                           CLAUDE_PLUGIN_DATA=str(tmp_path / "data")))
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["occurrences"] == []
-    assert (tmp_path / "data" / "grammar.db").exists()
+    transcript.write_text(json.dumps(user("u1", "the people")) + "\n")
+    payload = {"input_mode": "typed", "corrected_prompt": "fine", "mistakes": []}
+    run("save_check.py", save_payload(block(payload)), tmp_path / "data", CLAUDE_CONFIG_DIR=str(config_dir))
+    run("save_check.py", save_payload(block(payload), turn_id="turn-2", prompt="next"), tmp_path / "data",
+        CLAUDE_CONFIG_DIR=str(config_dir))
+    conn = connect(tmp_path / "data" / "grammar.db")
+    assert conn.execute("SELECT turn_id, prompt_uuid FROM prompts ORDER BY id").fetchall() == [
+        ("turn-1", "u1"), ("turn-2", None)]
 
 
 def test_prompt_hook_logs_when_claude_code_gives_another_data_folder(tmp_path):
@@ -196,9 +169,8 @@ def test_prompt_hook_warns_when_only_the_error_log_cannot_be_written(tmp_path):
     assert out["systemMessage"] == f"Grammar tracker: cannot write to the data folder {tmp_path}"
 
 
-def test_stop_hook_with_an_unwritable_data_folder_says_so(tmp_path, write_transcript):
+def test_save_check_with_an_unwritable_data_folder_says_so(tmp_path):
     payload = {"input_mode": "typed", "corrected_prompt": "fine", "mistakes": []}
-    transcript = write_transcript([user("u1", "fine"), assistant("a1", block(payload))])
     home = unwritable(tmp_path)
-    out = run("stop_hook.py", stop_payload(transcript), home)
+    out = run("save_check.py", save_payload(block(payload)), home)
     assert out == {"systemMessage": f"Grammar tracker: cannot write to the data folder {home}"}
