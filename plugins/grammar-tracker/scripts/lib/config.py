@@ -9,8 +9,8 @@ PLUGINS_DIR = Path(os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or CLAUDE_DIR 
 # The data folder Claude Code gives grammar-tracker@qol: the plugin id with "@" replaced by "-".
 PLUGIN_DATA = PLUGINS_DIR / "data" / "grammar-tracker-qol"
 
-# The plugin's data folder. Claude Code sets CLAUDE_PLUGIN_DATA for the command hooks; the scripts the mod runs use
-# PLUGIN_DATA.
+# The plugin's data folder: PLUGIN_DATA, or CLAUDE_PLUGIN_DATA when it is set (the tests and the query command line
+# set it to read another folder).
 HOME = Path(os.environ.get("CLAUDE_PLUGIN_DATA") or PLUGIN_DATA)
 DB_PATH = HOME / "grammar.db"
 ERROR_LOG = HOME / "errors.log"

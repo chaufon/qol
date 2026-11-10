@@ -50,6 +50,12 @@ type OccurrenceFields = {
   is_recurring: boolean
 }
 
+// What scripts/prompt_context.py prints: the grammar check instruction for a prompt, absent for a prompt that skips it.
+type ContextOutput = {
+  context?: string
+  systemMessage?: string
+}
+
 type SaveOutput = {
   systemMessage?: string
   does_not_apply?: true
@@ -360,6 +366,19 @@ async function settle($: EngineInterface, check: GrammarCheck | null) {
   await update($, pending, () => false)
 }
 
+// The grammar check instruction for a prompt, from scripts/prompt_context.py; undefined for a prompt that skips it.
+async function promptContext($: EngineInterface, prompt: string): Promise<string | undefined> {
+  try {
+    const stdout = await runScript($, ['prompt_context.py'], JSON.stringify({ prompt }))
+    const output: ContextOutput = stdout.trim() ? JSON.parse(stdout) : {}
+    if (output.systemMessage) $.ui.toast(output.systemMessage)
+    return output.context
+  } catch (error) {
+    $.ui.toast(`Grammar tracker: failed to add the grammar check (${String(error)})`)
+    return undefined
+  }
+}
+
 // Saves the check of the reply with scripts/save_check.py and shows it in the band and the pane.
 async function saveCheck($: EngineInterface, current: Turn, reply: string) {
   try {
@@ -395,11 +414,13 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // A prompt the user typed gets the grammar check instruction beside it, for the model alone, and is kept for the
+  // turn it starts. A failure shows a toast and lets the prompt through without the instruction.
   on('prompt.submit', async ($, e, next) => {
-    if (!e.isMeta && !e.command && e.turnId === undefined && e.text.trim()) {
-      submitted = { text: e.text, timestamp: new Date(await $.clock.now()).toISOString() }
-    }
-    return next(e)
+    if (e.isMeta || e.command || e.turnId !== undefined || !e.text.trim()) return next(e)
+    submitted = { text: e.text, timestamp: new Date(await $.clock.now()).toISOString() }
+    const context = await promptContext($, e.text)
+    return next(context ? { ...e, context: [...(e.context ?? []), context] } : e)
   })
 
   // A main-loop turn that starts with a submitted prompt waits for its check: the band and the pane say so.

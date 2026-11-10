@@ -31,7 +31,8 @@ const PANE_PROPS = {
   title: 'Grammar', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 10 }, view: {},
 } as const
 
-const CHECK_TEXT = '**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
+const INSTRUCTION = 'Begin your response with an English grammar check of the prompt.'
+const CHECK_TEXT ='**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
 const CHECK_BLOCK_END = '**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```'
 
 function engine(on: On, stdout: string) {
@@ -39,13 +40,20 @@ function engine(on: On, stdout: string) {
                   focus: [] as (boolean | undefined)[], closed: [] as string[], toasts: [] as string[], inputs: [] as string[],
                   chunks: [] as string[], gate: undefined as Promise<void> | undefined, yielded: [] as string[],
                   inits: [] as unknown[], pythons: { python3: '3' } as Record<string, string>,
-                  probes: [] as string[] }
+                  probes: [] as string[], context: JSON.stringify({ context: INSTRUCTION }),
+                  contextRuns: [] as (readonly string[])[], contextInputs: [] as string[],
+                  submits: [] as (readonly string[] | undefined)[] }
   on('process.run', ($, e) => {
     if (e.argv.includes('-c')) {
       calls.probes.push(e.argv[0]!)
       const major = calls.pythons[e.argv[0]!]
       if (major === undefined) throw new Error(`${e.argv[0]}: not found`)
       return { value: { exitCode: 0, stdout: `${major}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (e.argv.some(arg => arg.endsWith('/scripts/prompt_context.py'))) {
+      calls.contextRuns.push(e.argv)
+      calls.contextInputs.push(String((e.init as { stdin?: string } | undefined)?.stdin))
+      return { value: { exitCode: 0, stdout: calls.context, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     calls.runs.push(e.argv)
     calls.inits.push(e.init)
@@ -71,7 +79,7 @@ function engine(on: On, stdout: string) {
   on('session.id', () => ({ value: 's1' }))
   on('session.cwd', () => ({ value: '/proj' }))
   on('clock.now', () => ({ value: Date.parse('2026-10-17T12:00:00.000Z') }))
-  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('prompt.submit', ($, e) => { calls.submits.push(e.context); return { text: e.text, context: e.context } })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.step', async function* ($, e) {
     for (const text of calls.chunks) {
@@ -515,12 +523,66 @@ test('without Python 3 the check says so in a toast, and a Python installed late
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   calls.pythons = { python: '2' }
   await turn($, calls, [CHECK_TEXT])
-  expect(calls.probes).toEqual(['python3', 'py', 'python'])
+  // Searched for the instruction on submit, and again for the save: a failed search is not kept.
+  expect(calls.probes).toEqual(['python3', 'py', 'python', 'python3', 'py', 'python'])
   expect(calls.runs).toEqual([])
   expect(calls.toasts[0]).toContain('Grammar tracker needs Python 3.10 or newer as python3, py or python on the PATH')
   calls.pythons = { python: '3' }
   await turn($, calls, [CHECK_TEXT], 't2')
   expect(calls.runs[0]?.[0]).toBe('python')
+})
+
+test('a typed prompt reaches the model with the grammar check instruction beside it', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await $.prompt.submit({ text: 'I want improve it', context: ['from another mod'] } as never)
+  expect(calls.submits).toEqual([['from another mod', INSTRUCTION]])
+  expect(calls.contextRuns[0]?.[1]?.endsWith('/grammar-tracker/scripts/prompt_context.py')).toBe(true)
+  expect(calls.contextInputs).toEqual([JSON.stringify({ prompt: 'I want improve it' })])
+})
+
+for (const [pythons, command] of [[{ python3: '', py: '3' }, ['py', '-3']], [{ python: '3' }, ['python']]] as const) {
+  test(`the grammar check instruction comes from ${command.join(' ')} where python3 does not start`, async ($, on) => {
+    const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+    calls.pythons = { ...pythons }
+    await $.prompt.submit({ text: 'I want improve it' } as never)
+    expect(calls.contextRuns[0]?.slice(0, command.length)).toEqual([...command])
+    expect(calls.submits).toEqual([[INSTRUCTION]])
+  })
+}
+
+test('a prompt that skips the check reaches the model with no instruction, and is still tracked', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  calls.context = ''
+  await startTurn($, "Claude, don't grammar check: fix it")
+  expect(calls.submits).toEqual([undefined])
+  expect(await bandHas($, '⠋ Checking…')).toBe(true)
+})
+
+test('meta prompts, slash commands, prompts typed into a running turn and blank prompts get no instruction', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await $.prompt.submit({ text: 'meta', isMeta: true } as never)
+  await $.prompt.submit({ text: '/help', command: 'help' } as never)
+  await $.prompt.submit({ text: 'more', turnId: 't0' } as never)
+  await $.prompt.submit({ text: '  ' } as never)
+  expect(calls.contextRuns).toEqual([])
+  expect(calls.submits).toEqual([undefined, undefined, undefined, undefined])
+})
+
+test('without Python 3 the prompt reaches the model with no instruction and a toast says why', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  calls.pythons = {}
+  await $.prompt.submit({ text: 'I want improve it' } as never)
+  expect(calls.submits).toEqual([undefined])
+  expect(calls.toasts).toEqual(
+    ['Grammar tracker: failed to add the grammar check (Error: Grammar tracker needs Python 3.10 or newer as python3, py or python on the PATH)'])
+})
+
+test('a data folder that cannot be written shows its warning, and the prompt goes on with no instruction', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  calls.context = JSON.stringify({ systemMessage: 'Grammar tracker: cannot write to the data folder /x' })
+  await $.prompt.submit({ text: 'I want improve it' } as never)
+  expect(calls.submits).toEqual([undefined])
+  expect(calls.toasts).toEqual(['Grammar tracker: cannot write to the data folder /x'])
 })
 
 test('a Top mistakes row with the largest count fits the pane', () => {

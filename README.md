@@ -5,7 +5,7 @@ Quality-of-life mods for Claude Code.
 | Mod | What it does |
 | --- | --- |
 | [usage-footer](plugins/usage-footer) | Shows context usage, the 5-hour and 7-day rate-limit windows and their reset times at the right of the prompt footer |
-| [grammar-tracker](plugins/grammar-tracker) | Checks the English grammar of each prompt, counts repeated mistakes, and shows the check in a band and a pane. Needs Python 3.10 or later as `python3`, on Linux, macOS and Windows |
+| [grammar-tracker](plugins/grammar-tracker) | Checks the English grammar of each prompt, counts repeated mistakes, and shows the check in a band and a pane. Needs Python 3.10 or later as `python3`, `py` or `python`, on Linux, macOS and Windows |
 | [conversation-usage](plugins/conversation-usage) | Shows the tokens and estimated cost of each request of a conversation, the totals of the 5-hour and 7-day windows, and a history of stored conversations, in a band and a pane. Needs `sqlite3`, on Linux and macOS |
 | [file-links](plugins/file-links) | Makes the file references in Claude's replies clickable and opens the file at that line in a side pane. Clicks work in the fullscreen terminal |
 

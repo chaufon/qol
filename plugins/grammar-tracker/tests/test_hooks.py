@@ -14,10 +14,9 @@ def run(script, payload, home, **env):
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 
-def test_prompt_hook_adds_instruction(tmp_path):
-    out = run("prompt_hook.py", {"prompt": "I want improve it"}, tmp_path)
-    context = out["hookSpecificOutput"]["additionalContext"]
-    assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+def test_prompt_context_adds_instruction(tmp_path):
+    out = run("prompt_context.py", {"prompt": "I want improve it"}, tmp_path)
+    context = out["context"]
     assert "grammar-json" in context
     assert "native_expression" in context
     assert "**English grammar check:**" in context
@@ -32,25 +31,25 @@ def test_prompt_hook_adds_instruction(tmp_path):
     assert positions == sorted(positions)
 
 
-def test_prompt_hook_leaves_out_deleted_type(tmp_path):
+def test_prompt_context_leaves_out_deleted_type(tmp_path):
     conn = connect(tmp_path / "grammar.db")
     conn.execute("UPDATE mistake_types SET deleted_at = '2026-01-01T00:00:00' WHERE key = 'phrasal_verb'")
     conn.commit()
     conn.close()
-    out = run("prompt_hook.py", {"prompt": "I want improve it"}, tmp_path)
-    context = out["hookSpecificOutput"]["additionalContext"]
+    out = run("prompt_context.py", {"prompt": "I want improve it"}, tmp_path)
+    context = out["context"]
     assert "- phrasal_verb:" not in context
     assert "- spelling:" in context
 
 
-def test_prompt_hook_with_unreadable_database_logs_and_prints_nothing(tmp_path):
+def test_prompt_context_with_unreadable_database_logs_and_prints_nothing(tmp_path):
     (tmp_path / "grammar.db").mkdir()
-    assert run("prompt_hook.py", {"prompt": "I want improve it"}, tmp_path) is None
+    assert run("prompt_context.py", {"prompt": "I want improve it"}, tmp_path) is None
     assert "sqlite3" in (tmp_path / "errors.log").read_text()
 
 
-def test_prompt_hook_honors_skip_phrase(tmp_path):
-    assert run("prompt_hook.py", {"prompt": "Claude, don't grammar check: fix it"}, tmp_path) is None
+def test_prompt_context_honors_skip_phrase(tmp_path):
+    assert run("prompt_context.py", {"prompt": "Claude, don't grammar check: fix it"}, tmp_path) is None
 
 
 def test_script_without_claude_plugin_data_uses_the_data_folder_claude_code_gives_the_plugin(tmp_path):
@@ -132,23 +131,6 @@ def test_save_check_stores_the_transcript_uuid_of_earlier_prompts(tmp_path):
         ("turn-1", "u1"), ("turn-2", None)]
 
 
-def test_prompt_hook_logs_when_claude_code_gives_another_data_folder(tmp_path):
-    real = tmp_path / "elsewhere"
-    output = run("prompt_hook.py", {"prompt": "I want improve it"}, real, CLAUDE_CONFIG_DIR=str(tmp_path))
-    assert output["hookSpecificOutput"]["additionalContext"]
-    log = (real / "errors.log").read_text()
-    assert "Grammar tracker: the scripts the mod runs use" in log
-    assert str(tmp_path / "plugins" / "data" / "grammar-tracker-qol") in log
-    assert str(real) in log
-
-
-def test_prompt_hook_logs_nothing_when_the_data_folders_match(tmp_path):
-    real = tmp_path / "plugins" / "data" / "grammar-tracker-qol"
-    output = run("prompt_hook.py", {"prompt": "I want improve it"}, f"{real}/", CLAUDE_CONFIG_DIR=str(tmp_path))
-    assert output["hookSpecificOutput"]["additionalContext"]
-    assert not (real / "errors.log").exists()
-
-
 def unwritable(tmp_path):
     """A data folder that cannot be created: its parent is a file."""
     blocker = tmp_path / "file"
@@ -156,17 +138,10 @@ def unwritable(tmp_path):
     return blocker / "data"
 
 
-def test_prompt_hook_with_an_unwritable_data_folder_warns_without_blocking(tmp_path):
+def test_prompt_context_with_an_unwritable_data_folder_warns_without_blocking(tmp_path):
     home = unwritable(tmp_path)
-    out = run("prompt_hook.py", {"prompt": "I want improve it"}, home)
+    out = run("prompt_context.py", {"prompt": "I want improve it"}, home)
     assert out == {"systemMessage": f"Grammar tracker: cannot write to the data folder {home}"}
-
-
-def test_prompt_hook_warns_when_only_the_error_log_cannot_be_written(tmp_path):
-    (tmp_path / "errors.log").mkdir()
-    out = run("prompt_hook.py", {"prompt": "I want improve it"}, tmp_path, CLAUDE_CONFIG_DIR=str(tmp_path / "config"))
-    assert out["hookSpecificOutput"]["additionalContext"]
-    assert out["systemMessage"] == f"Grammar tracker: cannot write to the data folder {tmp_path}"
 
 
 def test_save_check_with_an_unwritable_data_folder_says_so(tmp_path):

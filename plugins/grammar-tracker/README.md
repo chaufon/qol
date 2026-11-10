@@ -5,16 +5,12 @@ repeats, and shows the check of the last prompt in a band above the prompt and i
 
 ## Requirements
 
-- Python 3.10 or later, run as `python3`. The scripts use the standard library only.
-  - The prompt hook (`hooks/hooks.json`) runs `python3` directly, with no shell.
-  - The scripts the hooks module runs use the first of `python3`, `py -3` and `python` that starts and is Python 3.
-- On Windows, `python3` must be a real `python3.exe` on the `PATH`, such as the one Python from the Microsoft Store
-  installs. A python.org install provides only `py` and `python`: the band and the pane then work, but Claude gets no
-  grammar check instruction, so no check reaches them.
-- On macOS, the `python3` of Apple's Command Line Tools (`/usr/bin/python3`) can be older than 3.10, and the mod then
-  shows `Grammar tracker needs Python 3.10 or newer`. Install a newer Python (Homebrew or python.org) and start Claude
-  Code from a terminal whose `PATH` finds it first. The Desktop app, started from the Dock, may not see a Homebrew
-  `PATH`.
+- Python 3.10 or newer on the `PATH`, as `python3`, `py` or `python`. The mod uses the first of `python3`, `py -3` and
+  `python` that starts and is Python 3, so any install from python.org, the Microsoft Store, Homebrew or a Linux
+  package works. The scripts use the standard library only.
+- A Python older than 3.10 shows `Grammar tracker needs Python 3.10 or newer`. On macOS this is the `python3` of Apple's
+  Command Line Tools (`/usr/bin/python3`): install a newer one and start Claude Code from a terminal whose `PATH` finds
+  it first.
 - The database (`grammar.db`) and the error log (`errors.log`) live in the plugin's data folder, which Claude Code
   creates as `~/.claude/plugins/data/grammar-tracker-qol/` for an install from the `qol` marketplace. Updates keep
   it. Uninstalling deletes it, unless you uninstall with `claude plugin uninstall grammar-tracker@qol --keep-data`.
@@ -45,12 +41,13 @@ Start the prompt with `Claude, do not grammar check` (or `don't grammar check`, 
 
 ## How it works
 
-1. `scripts/prompt_hook.py` (the mod's `UserPromptSubmit` hook, in `hooks/hooks.json`) asks Claude to start each reply
-   with a grammar check of the prompt: the label `**English grammar check:**` and a `grammar-json` block, with no other
+1. When you submit a prompt, the mod's hooks module (`hooks/register.tsx`) runs `scripts/prompt_context.py` and
+   attaches the text it prints to the prompt, for Claude alone. The text asks Claude to start the reply with a grammar
+   check of the prompt: the label `**English grammar check:**` and a `grammar-json` block, with no other
    text about the check. The block holds the input mode (typed or dictated), the corrected prompt, and one entry per
    mistake with its type, identifier, original sentence, corrected sentence and a short reason. The instruction lists
    the active types from the `mistake_types` table.
-2. The mod's hooks module (`hooks/register.tsx`) watches the streamed reply of the main loop. When the `grammar-json`
+2. The hooks module watches the streamed reply of the main loop. When the `grammar-json`
    block closes, it runs `scripts/save_check.py` with the turn id, the conversation id, the folder, the prompt, the
    reply so far and the time the prompt was sent. It does not wait for the end of the reply.
 3. `save_check.py` reads the `grammar-json` block, saves it to SQLite (`grammar.db`), and prints the corrected prompt
@@ -61,7 +58,7 @@ Start the prompt with `Claude, do not grammar check` (or `don't grammar check`, 
    of each save.
 
 ```
-prompt ──> prompt_hook.py ──> Claude's reply streams: label + grammar-json block + answer
+prompt ──> mod ──> prompt_context.py ──> Claude's reply streams: label + grammar-json block + answer
                                      │
           block closes ──> mod ──> save_check.py ──> grammar.db
                                      │
@@ -141,9 +138,10 @@ The `mistake_types` table in the database holds the types of mistake. Its column
 - Every icon is a single character and the mascot is block characters, so the pane needs no image support from the
   terminal. A font without a glyph shows its own placeholder for that icon.
 - Failures go to `errors.log` next to the database and never block Claude Code. A failure of the save or of the
-  pane's query also shows a toast; a failure of the prompt hook shows nothing.
+  pane's query also shows a toast. A prompt whose instruction cannot be built (a broken database) goes to Claude
+  without it; when no Python 3 starts, a toast says so.
 - When the data folder cannot be created or written (for example, a `CLAUDE_CONFIG_DIR` without write access), the
-  hooks and the pane show `Grammar tracker: cannot write to the data folder <path>` instead.
+  toasts and the pane show `Grammar tracker: cannot write to the data folder <path>` instead.
 
 ## Query
 
@@ -163,20 +161,20 @@ python3 scripts/query.py trend SESSION_ID [N]
 python3 scripts/query.py rekey
 ```
 
-Run it from the mod's folder. It reads the data folder described in [Data folder](#data-folder); set
+Run it from the mod's folder, with `py -3` or `python` in place of `python3` where that is your Python. It reads the data folder described in [Data folder](#data-folder); set
 `CLAUDE_PLUGIN_DATA` to read another one.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
-| `scripts/prompt_hook.py` | `UserPromptSubmit` hook: grammar check instruction |
+| `scripts/prompt_context.py` | Prints the grammar check instruction the mod attaches to each prompt |
 | `scripts/save_check.py` | Saves the reply's `grammar-json` block and prints the check with its counters |
 | `scripts/query.py` | Command line query on the database (`top`, `trend`, `rekey`) |
 | `scripts/lib/` | Configuration, error log, instruction text, transcript parsing, re-keying, database, report formatting |
 | `.claude-plugin/plugin.json` | Mod manifest |
-| `hooks/hooks.json` | Names the hooks module and the `UserPromptSubmit` command hook |
-| `hooks/register.tsx` | Hooks module: watches the streamed reply, runs `save_check.py`, draws the band and the pane, hides the check from the reply |
+| `hooks/hooks.json` | Names the hooks module |
+| `hooks/register.tsx` | Hooks module: finds Python, attaches the grammar check instruction to each prompt, watches the streamed reply, runs `save_check.py`, draws the band and the pane, hides the check from the reply |
 | `hooks/register.test.ts` | Tests of the hooks module (`claude plugin test`) |
 | `tsconfig.json` | TypeScript settings for the type check |
 | `types/index.d.ts` | Type contract of the mod's `$.state` values |
@@ -197,8 +195,7 @@ python3 -m pytest plugins/grammar-tracker
 `pytest` must be installed for the last command. The type check needs `plugins/grammar-tracker/.claude-plugin/types/`,
 which Claude Code writes the first time it loads the mod.
 
-In a session started with `--plugin-dir`, the command hooks use `~/.claude/plugins/data/grammar-tracker-inline/` and
-the scripts the hooks module runs use `grammar-tracker-qol/`.
+A session started with `--plugin-dir` uses the same data folder as an install, `grammar-tracker-qol/`.
 
 ## Status
 
