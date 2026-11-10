@@ -21,20 +21,14 @@ repeats, and shows the check of the last prompt in a band above the prompt and i
 
 ## Data folder
 
-Claude Code gives the data folder, `CLAUDE_PLUGIN_DATA`, to the mod's command hooks and not to its hooks module
-(`hooks/register.tsx`). The scripts the hooks module runs find the folder by the name Claude Code gives it,
-`grammar-tracker-qol`, in Claude Code's plugins folder: `$CLAUDE_CODE_PLUGIN_CACHE_DIR/data/`, else
-`$CLAUDE_CONFIG_DIR/plugins/data/`, else `~/.claude/plugins/data/` (`PLUGIN_DATA` in `scripts/lib/config.py`). This
-works from the first prompt after an install and `/reload-plugins`, for an install from GitHub or from a local copy of
-the `qol` marketplace.
+The mod saves your grammar checks in a SQLite database named `grammar.db`. By default, the database is in this
+folder:
 
-When `CLAUDE_PLUGIN_DATA` and `PLUGIN_DATA` differ, `scripts/prompt_hook.py` writes both paths to the `errors.log`
-in `CLAUDE_PLUGIN_DATA` on each prompt. That happens when the mod is installed from a marketplace with another name,
-or loaded with `--plugin-dir`.
+```
+~/.claude/plugins/data/grammar-tracker-qol/
+```
 
-`grammar.db` stores its schema version in the SQLite file header (`PRAGMA user_version`). On each connection,
-`scripts/lib/db.py` upgrades an older file to its `VERSION` and refuses a newer one: the file stays unchanged, the
-error goes to `errors.log`, and the toast or the **Top mistakes** tab asks you to update the mod.
+The same folder holds `errors.log`, where the mod writes any errors.
 
 ## Install
 
