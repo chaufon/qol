@@ -323,7 +323,7 @@ async function showTab($: EngineInterface, id: PaneTab) {
 }
 
 // Opens the pane. The Show button opens it with focus and turns the automatic opening on again. A check that arrives
-// opens it without focus, on the Last prompt tab, unless the user hid it by hand.
+// opens it without focus, on the Last prompt tab, unless the user hid it by hand or turned autoOpenPane off.
 async function openPane($: EngineInterface, isAutomatic = false) {
   if (!isAutomatic) await update($, manualHide, () => false)
   await update($, isOpen, () => true)
@@ -338,8 +338,11 @@ async function closePane($: EngineInterface) {
   await $.ui.close({ id: PANE })
 }
 
+// The autoOpenPane option: false keeps the pane closed until the user opens it.
+let isAutoOpenOn = true
+
 async function openPaneForCheck($: EngineInterface) {
-  if (await read($, manualHide) || await isPaneUp($)) return
+  if (!isAutoOpenOn || await read($, manualHide) || await isPaneUp($)) return
   await update($, tab, () => 'last')
   await openPane($, true)
 }
@@ -382,7 +385,8 @@ async function saveCheck($: EngineInterface, current: Turn, reply: string) {
   }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  isAutoOpenOn = options.autoOpenPane !== false
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE) {
       await update($, isOpen, () => false)

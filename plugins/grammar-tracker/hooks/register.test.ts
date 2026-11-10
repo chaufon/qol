@@ -256,6 +256,17 @@ test('a check opens the pane on the Last prompt tab, without focus', async ($, o
   expect(await pane.find({ text: ' ª Article · "the" ' })).toBeDefined()
 })
 
+test('a check does not open the pane when autoOpenPane is off, and Show still opens it', { options: { autoOpenPane: false } }, async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  expect(await bandHas($, '✗ 2 mistakes')).toBe(true)
+  expect(calls.opened).toEqual([])
+  await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'toggle' })
+  expect(calls.opened).toEqual(['grammar'])
+  expect(calls.focus).toEqual([true])
+})
+
 test('a pane the user hid is not opened by a check until the Show button opens it again', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])

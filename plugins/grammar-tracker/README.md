@@ -112,6 +112,9 @@ The `mistake_types` table in the database holds the types of mistake. Its column
   not open for a check with no mistakes, a check that does not apply, a skipped, interrupted or failed check, or after you hid it by hand. `Show`
   opens it again with the focus and turns the automatic opening back on. An open pane keeps its tab and refreshes. A
   pane the mod opens unasked is held back below 144 columns (110 once you opened it by hand); the band stays the signal.
+- To keep the pane closed until you open it, set the `autoOpenPane` option to `false` in `/config` (setting
+  `pluginConfigs["grammar-tracker"].options.autoOpenPane` in `settings.json`). The default is `true`. With `false`, the band
+  still shows each check, and `Show` opens the pane as usual.
 - Claude Code places the pane: a sidebar on the right in the fullscreen layout at 110 columns or more, otherwise a box
   above the prompt.
 - The pane's top row switches between its two tabs; the shown one has a colored background. Its last row holds the
