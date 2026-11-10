@@ -52,3 +52,16 @@ def test_top_with_an_unwritable_data_folder_exits_with_the_reason(tmp_path):
                             env=script_env(tmp_path, CLAUDE_PLUGIN_DATA=str(home)), cwd=tmp_path)
     assert result.returncode == 1
     assert result.stderr.strip() == f"Grammar tracker: cannot write to the data folder {home}"
+
+
+def test_trend_counts_the_mistakes_of_the_last_prompts_of_one_conversation(tmp_path):
+    conn = connect(tmp_path / "grammar.db")
+    mistake = Mistake(type="article", identifier="the", original="now related.", corrected="now the related.")
+    for turn, session, mistakes in [("p0", "s", [mistake]), ("p1", "s", []), ("p2", "other", [mistake]),
+                                    ("p3", "s", [mistake, mistake]), ("p4", "s", [])]:
+        save_check(conn, turn_id=turn, session_id=session, created_at="2026-10-18T12:00:00Z", project_dir="/p",
+                   original="o", check=Check(input_mode="typed", corrected_prompt="c", mistakes=mistakes))
+    conn.close()
+    assert json.loads(run(tmp_path, "trend", "s").stdout) == [1, 0, 2, 0]
+    assert json.loads(run(tmp_path, "trend", "s", "2").stdout) == [2, 0]
+    assert json.loads(run(tmp_path, "trend", "unknown").stdout) == []

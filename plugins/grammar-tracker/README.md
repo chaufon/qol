@@ -71,9 +71,9 @@ prompt ──> prompt_hook.py ──> Claude's reply streams: label + grammar-js
                                      │
           block closes ──> mod ──> save_check.py ──> grammar.db
                                      │
-                       band "Grammar: 3 mistakes, 1 recurring   g: Hide"
+                       band "✎ ✗ 3 mistakes · ⟳ 1 recurring   g: Hide"
                                      │ the pane opens, or click Show, or ctrl+x tab then g
-                       pane: Last prompt | Top mistakes (query.py top)
+                       pane: Last prompt (query.py trend) | Top mistakes (query.py top)
 ```
 
 ## Mistake types
@@ -96,12 +96,13 @@ The `mistake_types` table in the database holds the types of mistake. Its column
 
 ## Band and pane
 
-- The band above the prompt shows one line for the last prompt: `Grammar: checking…` while the reply streams,
-  `Grammar: 3 mistakes, 1 recurring   g: Show` once the check block closes (the pane may be closed),
-  `No mistakes. Great English, keep it up!` when the check finds none,
+- The band above the prompt shows one line of colored chips for the last prompt, after a teal `✎`: `⠋ Checking…`
+  while the reply streams, `✗ 3 mistakes · ⟳ 1 recurring   g: Show` (red and yellow) once the check block closes
+  (the pane may be closed; the recurring chip is left out when no mistake is recurring),
+  `✓ No mistakes` (green) when the check finds none,
   `Grammar check does not apply to the last prompt` as soon as that line streams, or
   `Grammar: no check for the last prompt` (a new conversation, an interrupted reply, a reply without a check block, or
-  a failed save). Its `Show` button is always there, so the **Top mistakes** tab is always reachable.
+  a failed save), both dim. Its `Show` button is always there, so the **Top mistakes** tab is always reachable.
 - A mistake is recurring when its counter, across all prompts, reaches `RECURRING_THRESHOLD = 3`
   (`scripts/lib/config.py`).
 - Open the `✎ Grammar` pane with a click on `Show` (fullscreen terminal) or with `ctrl+x tab` then `g`. Close it with
@@ -116,19 +117,32 @@ The `mistake_types` table in the database holds the types of mistake. Its column
 - The pane's top row switches between its two tabs; the shown one has a colored background. Its last row holds the
   keys, `t: Tab` and `h: Hide`, under a line, and both stay at the bottom while the pane scrolls. `t` switches the tab while the pane
   has the focus.
-- **Last prompt** tab: while the reply streams, the tab shows only `⠋ Checking this prompt…`.
-  Then one card per mistake. The card's border shows the number, type, identifier and counter
-  (`1 · Word choice · "looks like" ×3 ⟳`). Inside are the original sentence in red (`✗`), the corrected sentence in
-  green (`✓`), Claude's reason, and the type's description and example, dimmed. Recurring mistakes have a yellow
-  border and `⟳`. The corrected prompt is in its own card at the end. A check with no mistakes shows
-  `✓ No mistakes. Great English, keep it up!` in green, then the corrected prompt card.
-- **Top mistakes** tab: a table of the 10 most frequent mistakes with rank, type, identifier and counter, read again
-  each time the tab is shown. Each column has a dashed line under its header. The counter is yellow for a recurring
-  mistake and green otherwise. A line under the table gives the number of recurring mistakes and the sum of the
-  counters. A click on a row opens a card under it and marks the row with `▾`, and a second click closes it; one row
-  is open at a time. The card's
+- **Last prompt** tab: while the reply streams, the tab shows only `⠋ Checking this prompt…`. Then:
+  - A mascot drawn with block characters and a headline. The mascot smiles; it looks worried when a mistake of the
+    check is recurring. The headline counts the mistakes (`3 mistakes, 1 you keep repeating.`), and the line under it
+    names the most frequent recurring mistake (`Watch out for "it" (×59)`). A check with no mistakes shows
+    `✓ No mistakes. Great English, keep it up!` in green.
+  - Three tiles: **Mistakes** and **Recurring** of this check, and **Clean streak**, the prompts of this
+    conversation, counted back from the last one, with no mistake. `–` stands for a streak that failed to load.
+  - A trend line, `Conversation ▅▁█▁▁ last 5 prompts`, with one block per prompt of this conversation (the last 10),
+    as tall as its mistake count: green and lowest for a clean prompt, yellow otherwise.
+  - One card per mistake. The card's border shows an icon of the mistake's type, the type, the identifier, and at the
+    right end five dots that fill as the mistake repeats, the counter and `⟳` for a recurring mistake
+    (`⇄ Preposition · "check + no preposition"   ●●○○○ ×2`). Inside are the original sentence in red (`✗`), the
+    corrected sentence in green (`✓`), Claude's reason, and the type's description and example, dimmed. Recurring
+    mistakes have a yellow border. The corrected prompt is in its own card at the end.
+- **Top mistakes** tab: the 10 most frequent mistakes, read again each time the tab is shown. It starts with the
+  mascot, worried while a mistake recurs and happy otherwise, a headline (`2 mistakes you keep repeating.`) and the
+  mistake to watch out for. Three tiles follow: the sum of the counters, the recurring mistakes and the types. Under
+  them a bar shows the share of each type in the sum, in the type's color, with the icon and the percentage of each
+  type under it. Then one row per mistake: rank, the type's icon, type, identifier, a bar and the counter. The bar is
+  as long as the counter's share of the largest counter, and the bar and the counter are yellow for a recurring
+  mistake and green otherwise. A click on a row opens a card under it and marks
+  the row with `▾`, and a second click closes it; one row is open at a time. The card's
   border shows the type's description (cut with `…` when the border is too short, and then repeated in full inside).
   Inside are the type's example and the most recent original sentence, corrected sentence and reason.
+- Every icon is a single character and the mascot is block characters, so the pane needs no image support from the
+  terminal. A font without a glyph shows its own placeholder for that icon.
 - Failures go to `errors.log` next to the database and never block Claude Code. A failure of the save or of the
   pane's query also shows a toast; a failure of the prompt hook shows nothing.
 - When the data folder cannot be created or written (for example, a `CLAUDE_CONFIG_DIR` without write access), the
@@ -139,12 +153,16 @@ The `mistake_types` table in the database holds the types of mistake. Its column
 `top` prints the mistakes you make most often as a JSON list, each with its counter and its latest example, with the
 fields of `save_check.py`'s `occurrences`. The optional `N` sets how many (default 10). The pane uses it.
 
+`trend SESSION_ID [N]` prints the mistake count of each of the last `N` prompts (default 10) of one conversation, oldest
+first, as a JSON list. The pane uses it for the clean streak and the trend line.
+
 `rekey` stores the transcript uuid of each saved prompt that has none: it finds the user entry of the conversation's
 transcript with the same text and the closest time. It prints the number of prompts that got a uuid. Prompts with no
 match stay as they are, and a later run tries them again.
 
 ```
 python3 scripts/query.py top [N]
+python3 scripts/query.py trend SESSION_ID [N]
 python3 scripts/query.py rekey
 ```
 
@@ -157,7 +175,7 @@ Run it from the mod's folder. It reads the data folder described in [Data folder
 |---|---|
 | `scripts/prompt_hook.py` | `UserPromptSubmit` hook: grammar check instruction |
 | `scripts/save_check.py` | Saves the reply's `grammar-json` block and prints the check with its counters |
-| `scripts/query.py` | Command line query on the database (`top`, `rekey`) |
+| `scripts/query.py` | Command line query on the database (`top`, `trend`, `rekey`) |
 | `scripts/lib/` | Configuration, error log, instruction text, transcript parsing, re-keying, database, report formatting |
 | `.claude-plugin/plugin.json` | Mod manifest |
 | `hooks/hooks.json` | Names the hooks module and the `UserPromptSubmit` command hook |

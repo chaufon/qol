@@ -306,3 +306,13 @@ def top_mistakes(conn, limit):
         (limit,),
     ).fetchall()
     return [SavedOccurrence(*row) for row in rows]
+
+
+def session_trend(conn: sqlite3.Connection, session_id: str, limit: int) -> list[int]:
+    """Return the mistake count of each of the last `limit` prompts of a conversation, oldest first."""
+    rows = conn.execute(
+        "SELECT COUNT(o.id) FROM prompts p LEFT JOIN occurrences o ON o.prompt_id = p.id"
+        " WHERE p.session_id = ? GROUP BY p.id ORDER BY p.id DESC LIMIT ?",
+        (session_id, limit),
+    ).fetchall()
+    return [n for (n,) in reversed(rows)]

@@ -2,7 +2,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { bandLine, cell, checkState, countColumn, mistakeColumn, stripCheck, toCheck } from './register'
+import { shareCells, bandChips, barFill, cell, checkState, cleanStreak, countColumn, meter, mascotRows, mistakeColumn, sparkline,
+         stripCheck, toCheck, typeColor, typeIcon } from './register'
 
 
 const SAVE_OUTPUT = {
@@ -34,7 +35,7 @@ const CHECK_TEXT = '**English grammar check:**\n```grammar-json\n{"mistakes": []
 const CHECK_BLOCK_END = '**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```'
 
 function engine(on: On, stdout: string) {
-  const calls = { stdout, stderr: '', exitCode: 0, top: JSON.stringify(SAVE_OUTPUT.occurrences), isTopBroken: false, runs: [] as (readonly string[])[], opened: [] as string[],
+  const calls = { stdout, stderr: '', exitCode: 0, top: JSON.stringify(SAVE_OUTPUT.occurrences), trend: '[1,0,2,0,0]', isTrendBroken: false, isTopBroken: false, runs: [] as (readonly string[])[], opened: [] as string[],
                   focus: [] as (boolean | undefined)[], closed: [] as string[], toasts: [] as string[], inputs: [] as string[],
                   chunks: [] as string[], gate: undefined as Promise<void> | undefined, yielded: [] as string[],
                   inits: [] as unknown[], pythons: { python3: '3' } as Record<string, string>,
@@ -49,6 +50,10 @@ function engine(on: On, stdout: string) {
     calls.runs.push(e.argv)
     calls.inits.push(e.init)
     if (e.argv[2] === 'top' && calls.isTopBroken) throw new Error('timed out')
+    if (e.argv[2] === 'trend' && calls.isTrendBroken) throw new Error('timed out')
+    if (e.argv[2] === 'trend') {
+      return { value: { exitCode: 0, stdout: calls.trend, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[2] === 'top') {
       return { value: { exitCode: 0, stdout: calls.top, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
@@ -150,10 +155,13 @@ test('stripCheck leaves other text unchanged', () => {
   expect(stripCheck('**English grammar check:** no block')).toBe('**English grammar check:** no block')
 })
 
-test('toCheck and bandLine summarize the output of save_check.py', () => {
-  expect(bandLine(toCheck(SAVE_OUTPUT)!)).toBe('Grammar: 2 mistakes, 1 recurring')
-  expect(bandLine(toCheck({ does_not_apply: true })!)).toBe('Grammar check does not apply to the last prompt')
-  expect(bandLine(toCheck({ ...SAVE_OUTPUT, occurrences: [] })!)).toBe('No mistakes. Great English, keep it up!')
+test('toCheck and bandChips summarize the output of save_check.py', () => {
+  expect(bandChips(toCheck(SAVE_OUTPUT)!)).toEqual([{ text: '✗ 2 mistakes', color: 'error' },
+                                                    { text: '⟳ 1 recurring', color: 'warning' }])
+  expect(bandChips(toCheck({ ...SAVE_OUTPUT, occurrences: [SAVE_OUTPUT.occurrences[0]!] })!))
+    .toEqual([{ text: '✗ 1 mistake', color: 'error' }])
+  expect(bandChips(toCheck({ does_not_apply: true })!)).toEqual([{ text: 'Grammar check does not apply to the last prompt', isDim: true }])
+  expect(bandChips(toCheck({ ...SAVE_OUTPUT, occurrences: [] })!)).toEqual([{ text: '✓ No mistakes', color: 'success' }])
   expect(toCheck({ systemMessage: 'Grammar tracker: failed to log (see errors.log)' })).toBe(null)
 })
 
@@ -178,7 +186,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(calls.runs[0]?.[1]?.endsWith('/grammar-tracker/scripts/save_check.py')).toBe(true)
     expect(JSON.parse(calls.inputs[0]!)).toEqual({ turn_id: 't1', session_id: 's1', cwd: '/proj', prompt: 'the people',
                                                    reply: CHECK_TEXT, timestamp: '2026-10-17T12:00:00.000Z' })
-    expect(await bandHas($, 'Grammar: 2 mistakes, 1 recurring', surface)).toBe(true)
+    expect(await bandHas($, '✗ 2 mistakes', surface)).toBe(true)
     expect(calls.opened).toEqual(['grammar'])
     expect(await bandHas($, 'Hide', surface)).toBe(true)
   })
@@ -190,14 +198,14 @@ test('the check is saved and shown while the rest of the reply still streams', a
   calls.gate = new Promise(resolve => { release = resolve })
   await startTurn($)
   const done = stream($, calls, ['**English grammar check:**\n```grammar-', 'json\n{"mistakes": []}\n```', '\n\nThe answer'])
-  await until(async () => await bandHas($, 'Grammar: 2 mistakes, 1 recurring'))
-  expect(await bandHas($, 'Grammar: 2 mistakes, 1 recurring')).toBe(true)
+  await until(async () => await bandHas($, '✗ 2 mistakes'))
+  expect(await bandHas($, '✗ 2 mistakes')).toBe(true)
   expect(calls.opened).toEqual(['grammar'])
   expect(calls.focus).toEqual([undefined])
   release()
   await done
   await $.turn.complete(TURN)
-  expect(await bandHas($, 'Grammar: 2 mistakes, 1 recurring')).toBe(true)
+  expect(await bandHas($, '✗ 2 mistakes')).toBe(true)
   expect(calls.runs.filter(argv => argv[1]?.endsWith('save_check.py'))).toHaveLength(1)
 })
 
@@ -212,11 +220,11 @@ test('the band says checking and the pane hides the check before while the reply
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
   await startTurn($, 'next prompt', 't2')
-  expect(await bandHas($, 'Grammar: checking…')).toBe(true)
+  expect(await bandHas($, '⠋ Checking…')).toBe(true)
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: '⠋ Checking this prompt…' })).toBeDefined()
   expect(await pane.find({ text: '✗ c' })).toBeUndefined()
-  expect(await pane.find({ text: ' Corrected prompt ' })).toBeUndefined()
+  expect(await pane.find({ text: ' ✎ Corrected prompt ' })).toBeUndefined()
 })
 
 test('the pane shows only the checking line while the first prompt is checked', async ($, on) => {
@@ -237,7 +245,7 @@ test('a check that arrives keeps the tab of a pane already open and refreshes it
   expect(await pane.find({ text: /Malformed tense/ })).toBeDefined()
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-next' })
   await pane.redraw()
-  expect(await pane.find({ text: ' 1 · Article · "the" ×1 ' })).toBeDefined()
+  expect(await pane.find({ text: ' ª Article · "the" ' })).toBeDefined()
 })
 
 test('a check opens the pane on the Last prompt tab, without focus', async ($, on) => {
@@ -245,7 +253,7 @@ test('a check opens the pane on the Last prompt tab, without focus', async ($, o
   await turn($, calls, [CHECK_TEXT])
   expect(calls.focus).toEqual([undefined])
   const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ text: ' 1 · Article · "the" ×1 ' })).toBeDefined()
+  expect(await pane.find({ text: ' ª Article · "the" ' })).toBeDefined()
 })
 
 test('a pane the user hid is not opened by a check until the Show button opens it again', async ($, on) => {
@@ -256,7 +264,7 @@ test('a pane the user hid is not opened by a check until the Show button opens i
   expect(calls.closed).toEqual(['grammar'])
   await turn($, calls, [CHECK_TEXT], 't2')
   expect(calls.opened).toEqual(['grammar'])
-  expect(await bandHas($, 'Grammar: 2 mistakes, 1 recurring')).toBe(true)
+  expect(await bandHas($, '✗ 2 mistakes')).toBe(true)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'toggle' })
   expect(calls.opened).toEqual(['grammar', 'grammar'])
   expect(calls.focus).toEqual([undefined, true])
@@ -314,7 +322,7 @@ test('an interrupted reply clears the check and does not open the pane', async (
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await startTurn($)
   await stream($, calls, ['**English grammar check:**\n```grammar-json\n{"mist'])
-  expect(await bandHas($, 'Grammar: checking…')).toBe(true)
+  expect(await bandHas($, '⠋ Checking…')).toBe(true)
   await $.turn.complete({ ...TURN, reason: 'interrupted', isAborted: true } as never)
   expect(await bandHas($, 'Grammar: no check for the last prompt')).toBe(true)
   expect(calls.opened).toEqual([])
@@ -343,7 +351,7 @@ test('checkState follows the start of the reply', () => {
 test('the scripts run without a data folder from the mod', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
-  expect(calls.runs.map(argv => argv[2])).toEqual([undefined, 'top', 'top'])
+  expect(calls.runs.map(argv => argv[2])).toEqual([undefined, 'trend', 'top', 'top'])
   expect(calls.inits.every(init => (init as { env?: unknown } | undefined)?.env === undefined)).toBe(true)
 })
 
@@ -361,7 +369,7 @@ test('a turn that starts without a submitted prompt is not tracked', async ($, o
   await $.turn.start({ text: 'notification', turnId: 't1' })
   await stream($, calls, [CHECK_TEXT])
   expect(calls.runs).toEqual([])
-  expect(await bandHas($, 'Grammar: checking…')).toBe(false)
+  expect(await bandHas($, '⠋ Checking…')).toBe(false)
 })
 
 
@@ -394,14 +402,16 @@ test('the Last prompt tab draws a card per mistake with its title, sentences, re
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ text: ' 1 · Article · "the" ×1 ' })).toBeDefined()
-  expect(await pane.find({ text: ' 2 · Malformed tense · "does have" ×3 ⟳ ' })).toBeDefined()
+  expect(await pane.find({ text: ' ª Article · "the" ' })).toBeDefined()
+  expect(await pane.find({ text: ' ●○○○○ ×1 ' })).toBeDefined()
+  expect(await pane.find({ text: ' ◴ Malformed tense · "does have" ' })).toBeDefined()
+  expect(await pane.find({ text: ' ●●●○○ ×3 ⟳ ' })).toBeDefined()
   expect(await pane.find({ text: '✗ c' })).toBeDefined()
   expect(await pane.find({ text: '✓ d' })).toBeDefined()
   expect(await pane.find({ text: 'a known remote takes the' })).toBeDefined()
   expect(await pane.find({ text: 'A wrong, missing or extra "a/an" or "the". ("the people are selfish" instead of "people are selfish")' })).toBeDefined()
   expect(await pane.find({ text: 'The right tense built wrong: auxiliaries missing, extra or in the wrong place.' })).toBeDefined()
-  expect(await pane.find({ text: ' Corrected prompt ' })).toBeDefined()
+  expect(await pane.find({ text: ' ✎ Corrected prompt ' })).toBeDefined()
 })
 
 test('the Last prompt tab leaves out the parentheses for an empty example', async ($, on) => {
@@ -420,13 +430,13 @@ test('the Last prompt tab praises a check with no mistakes and shows the correct
   expect(praise?.props.color).toBe('success')
   expect(praise?.props.bold).toBe(true)
   expect(praise?.props.dimColor).toBeFalsy()
-  expect(await pane.find({ text: ' Corrected prompt ' })).toBeDefined()
+  expect(await pane.find({ text: ' ✎ Corrected prompt ' })).toBeDefined()
 })
 
 test('a check with no mistakes shows in the band and does not open the pane', async ($, on) => {
   const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
   await turn($, calls, [CHECK_TEXT])
-  expect(await bandHas($, 'No mistakes. Great English, keep it up!')).toBe(true)
+  expect(await bandHas($, '✓ No mistakes')).toBe(true)
   expect(calls.opened).toEqual([])
 })
 
@@ -474,10 +484,10 @@ test('the Top mistakes tab says when nothing is logged', async ($, on) => {
   expect(await pane.find({ text: 'No mistakes logged yet' })).toBeDefined()
 })
 
-test('cell cuts or pads a table cell and the Count column fits its header and the largest count', () => {
+test('cell cuts or pads a table cell and the Count column fits the largest count', () => {
   expect(cell('article', 4)).toBe('art…')
   expect(cell('the', 5)).toBe('the  ')
-  expect(countColumn(68)).toBe(5)
+  expect(countColumn(7)).toBe(1)
   expect(countColumn(123456)).toBe(6)
 })
 
@@ -505,18 +515,21 @@ test('without Python 3 the check says so in a toast, and a Python installed late
 test('a Top mistakes row with the largest count fits the pane', () => {
   for (const largest of [7, 68, 512, 123456]) {
     const mistake = cell('the', mistakeColumn(80, largest))
-    const row = `▾${'10'.padStart(3)} ${cell('Article', 15)}  ${mistake}${String(largest).padStart(countColumn(largest))}`
+    const row = `▾${'10'.padStart(3)} ª ${cell('Article', 15)}  ${mistake} ${'█'.repeat(10)} ${String(largest).padStart(countColumn(largest))}`
     expect(row.length).toBe(80)
   }
 })
 
-test('the Top mistakes tab ends with the recurring mistakes and the sum of the counts', async ($, on) => {
+test('the Top mistakes tab shows a worried mascot, the tiles and the share of each type', async ($, on) => {
   const calls = engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
-  expect(await pane.find({ text: '1 recurring · 4 mistakes in the top 2' })).toBeDefined()
-  const counts = (await pane.findAll({ type: 'Text' })).filter(t => t.props.color === 'warning' || t.props.color === 'success')
+  expect(await pane.find({ text: '1 mistake you keep repeating.' })).toBeDefined()
+  expect(await pane.find({ text: /^Watch out for ".*" \(×3\)$/ })).toBeDefined()
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text)
+  expect(texts).toEqual(expect.arrayContaining(['4', 'Mistakes', 'Recurring', 'Types', 'Where your mistakes go (top 2)', '◴ 75%', '  ª 25%']))
+  const counts = (await pane.findAll({ type: 'Text' })).filter(t => /^ \d+$/.test(t.text))
   expect(counts.map(t => [t.text.trim(), t.props.color])).toEqual([['1', 'success'], ['3', 'warning']])
 })
 
@@ -542,4 +555,78 @@ test('the footer key t switches between the tabs, and the tab on show is colored
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-next' })
   await pane.redraw()
   expect(await shown()).toBe(' Last prompt ')
+})
+
+test('the Top mistakes rows draw an icon and a bar as long as the count', async ($, on) => {
+  const calls = engine(on, '')
+  await pressBand($)
+  const pane = await $.ui.mount(PANE)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text)
+  expect(texts).toContain('ª')
+  expect(texts).toContain('◴')
+  expect(texts).toContain('█'.repeat(10))
+  expect(texts).toContain('█'.repeat(3))
+  expect(texts).toContain('░'.repeat(7))
+})
+
+test('the Last prompt tab shows the tiles, the trend of this conversation and a worried mascot for a recurring mistake', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  const pane = await $.ui.mount(PANE)
+  expect(calls.runs.some(run => run[2] === 'trend' && run[3] === 's1' && run[4] === '10')).toBe(true)
+  expect(await pane.find({ text: '2 mistakes, 1 you keep repeating.' })).toBeDefined()
+  expect(await pane.find({ text: 'Watch out for "does have" (×3)' })).toBeDefined()
+  const tiles = (await pane.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.alignItems === 'center')
+  expect(tiles.map(t => t.text.replace(/\s+/g, ' ').trim())).toEqual(['2Mistakes', '1Recurring', '2Clean streak'])
+  const bars = (await pane.findAll({ type: 'Text' })).filter(t => '▁▂▃▄▅▆▇█'.includes(t.text) && t.text.length === 1 && (t.props.color === 'warning' || t.props.color === 'success'))
+  expect(bars.map(t => [t.text, t.props.color])).toEqual([['▅', 'warning'], ['▁', 'success'], ['█', 'warning'], ['▁', 'success'], ['▁', 'success']])
+  expect(await pane.find({ text: ' last 5 prompts' })).toBeDefined()
+})
+
+test('a check with no mistakes shows the clean streak and a happy mascot', async ($, on) => {
+  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
+  await turn($, calls, [CHECK_TEXT])
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: '2 prompts in a row with no mistakes' })).toBeDefined()
+})
+
+test('a failed trend query shows a toast and a dash for the streak', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  calls.isTrendBroken = true
+  await turn($, calls, [CHECK_TEXT])
+  expect(calls.toasts.some(t => t.startsWith('Grammar tracker: failed to read the trend ('))).toBe(true)
+  const pane = await $.ui.mount(PANE)
+  const tiles = (await pane.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.alignItems === 'center')
+  expect(tiles.map(t => t.text.replace(/\s+/g, ' ').trim()).at(-1)).toBe('–Clean streak')
+})
+
+test('meter, barFill, sparkline and cleanStreak scale a count', () => {
+  expect([1, 2, 3, 4, 5, 9, 10, 59].map(meter)).toEqual(['●○○○○', '●●○○○', '●●●○○', '●●●○○', '●●●●○', '●●●●○', '●●●●●', '●●●●●'])
+  expect([barFill(59, 59), barFill(1, 59), barFill(30, 59)]).toEqual([10, 1, 5])
+  expect(sparkline([0, 1, 4, 8])).toEqual(['▁', '▂', '▅', '█'])
+  expect(sparkline([0, 0])).toEqual(['▁', '▁'])
+  expect([cleanStreak([1, 0, 0]), cleanStreak([0, 2]), cleanStreak([]), cleanStreak([0, 0])]).toEqual([2, 0, 0, 2])
+})
+
+test('every mistake type has an icon and a color, and an unknown type uses the "other" ones', () => {
+  expect(typeIcon('article')).toBe('ª')
+  expect(typeIcon('nope')).toBe(typeIcon('other'))
+  expect(typeColor('nope')).toBe(typeColor('other'))
+})
+
+test('the mascot is four rows of ten cells, and its mouth turns down when worried', () => {
+  const text = (rows: ReturnType<typeof mascotRows>) => rows.map(row => row.map(run => run.text).join(''))
+  const happy = mascotRows('happy')
+  expect(happy.length).toBe(4)
+  expect(text(happy).map(row => row.length)).toEqual([10, 10, 10, 10])
+  expect(text(mascotRows('worried'))).not.toEqual(text(happy))
+})
+
+test('shareCells splits a bar by share, one cell at least, and fills the bar', () => {
+  expect(shareCells([3, 1], 8)).toEqual([6, 2])
+  expect(shareCells([59, 31, 22, 17, 12, 9, 6, 4], 68).reduce((a, b) => a + b, 0)).toBe(68)
+  expect(shareCells([100, 1, 1], 10)).toEqual([8, 1, 1])
+  expect(shareCells([1, 1, 1], 2)).toEqual([1, 1])
+  expect(shareCells([], 10)).toEqual([])
 })
