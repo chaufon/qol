@@ -537,7 +537,13 @@ test('a typed prompt reaches the model with the grammar check instruction beside
   await $.prompt.submit({ text: 'I want improve it', context: ['from another mod'] } as never)
   expect(calls.submits).toEqual([['from another mod', INSTRUCTION]])
   expect(calls.contextRuns[0]?.[1]?.endsWith('/grammar-tracker/scripts/prompt_context.py')).toBe(true)
-  expect(calls.contextInputs).toEqual([JSON.stringify({ prompt: 'I want improve it' })])
+  expect(calls.contextInputs).toEqual([JSON.stringify({ prompt: 'I want improve it', native_language: 'Spanish' })])
+})
+
+test('the native_language option reaches the script that writes the instruction', { options: { native_language: 'French' } }, async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await $.prompt.submit({ text: 'I want improve it' } as never)
+  expect(calls.contextInputs).toEqual([JSON.stringify({ prompt: 'I want improve it', native_language: 'French' })])
 })
 
 for (const [pythons, command] of [[{ python3: '', py: '3' }, ['py', '-3']], [{ python: '3' }, ['python']]] as const) {

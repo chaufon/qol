@@ -1,9 +1,12 @@
 {
   "name": "grammar-tracker",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Checks the English grammar of each prompt, counts repeated mistakes, and shows the check in a band and a pane",
   "license": "MIT",
-  "author": { "name": "Chaufon", "url": "https://github.com/chaufon" },
+  "author": {
+    "name": "Chaufon",
+    "url": "https://github.com/chaufon"
+  },
   "types": "./types/index.d.ts",
   "userConfig": {
     "autoOpenPane": {
@@ -11,6 +14,18 @@
       "title": "Open the pane on a check",
       "description": "Open the Grammar pane by itself when a check with mistakes arrives",
       "default": true
+    },
+    "native_language": {
+      "type": "string",
+      "title": "Native language",
+      "description": "The language you speak natively. The grammar check looks for the mistakes its speakers make in English.",
+      "options": [
+        "Spanish",
+        "Portuguese",
+        "French",
+        "Italian"
+      ],
+      "default": "Spanish"
     }
   }
 }

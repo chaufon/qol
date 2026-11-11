@@ -346,6 +346,8 @@ async function closePane($: EngineInterface) {
 
 // The autoOpenPane option: false keeps the pane closed until the user opens it.
 let isAutoOpenOn = true
+// The native_language option, passed to scripts/prompt_context.py, which checks it and names it in the instruction.
+let nativeLanguage: string | undefined
 
 async function openPaneForCheck($: EngineInterface) {
   if (!isAutoOpenOn || await read($, manualHide) || await isPaneUp($)) return
@@ -369,7 +371,7 @@ async function settle($: EngineInterface, check: GrammarCheck | null) {
 // The grammar check instruction for a prompt, from scripts/prompt_context.py; undefined for a prompt that skips it.
 async function promptContext($: EngineInterface, prompt: string): Promise<string | undefined> {
   try {
-    const stdout = await runScript($, ['prompt_context.py'], JSON.stringify({ prompt }))
+    const stdout = await runScript($, ['prompt_context.py'], JSON.stringify({ prompt, native_language: nativeLanguage }))
     const output: ContextOutput = stdout.trim() ? JSON.parse(stdout) : {}
     if (output.systemMessage) $.ui.toast(output.systemMessage)
     return output.context
@@ -406,6 +408,7 @@ async function saveCheck($: EngineInterface, current: Turn, reply: string) {
 
 export const register: Register = (on, options) => {
   isAutoOpenOn = options.autoOpenPane !== false
+  nativeLanguage = typeof options.native_language === 'string' ? options.native_language : undefined
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE) {
       await update($, isOpen, () => false)

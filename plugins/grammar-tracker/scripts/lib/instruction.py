@@ -2,17 +2,18 @@ from lib.db import MistakeType
 from lib.transcript import CHECK_LABEL, NOT_APPLY
 
 
-def build_instruction(types: list[MistakeType]) -> str:
-    """Return the instruction for the model, listing the given mistake types and their identifier rules."""
+def build_instruction(types: list[MistakeType], native_language: str) -> str:
+    """Return the instruction for the model for a speaker of `native_language`, listing the given mistake types and
+    their identifier rules."""
     type_rules = "\n".join(f"- {t.key}: {t.identifier_rule}" for t in types)
     return f"""\
-The user is a Spanish speaker writing prompts in English. Begin your response with an English grammar check of the \
+The user is a {native_language} speaker writing prompts in English. Begin your response with an English grammar check of the \
 user's prompt just submitted: the literal label {CHECK_LABEL} on its own line, then a fenced code block with the \
 language tag grammar-json. Write no other text about the check. The user often dictates prompts by voice. Ignore \
 speech artifacts: filler words (uh, um, so, like), repeated words, false starts, mid-sentence self-corrections, \
 changes of idea, and missing or odd punctuation. Do not list them as mistakes and drop them silently from the \
 rewrite. Report only errors the user would also make when typing: spelling, verb tense and agreement, prepositions, \
-articles, word order, wrong word choice, and Spanish calques. Report evident mistakes, use more natural phrasing \
+articles, word order, wrong word choice, and {native_language} calques. Report evident mistakes, use more natural phrasing \
 where needed, and rewrite the whole prompt with those changes applied.
 
 The block holds one valid JSON object on a single line:

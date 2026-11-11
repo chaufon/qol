@@ -2,7 +2,10 @@ import json
 import subprocess
 import sys
 
+import pytest
+
 from conftest import ROOT, block, script_env, user
+from lib import config
 from lib.db import connect
 
 
@@ -29,6 +32,51 @@ def test_prompt_context_adds_instruction(tmp_path):
                                                          "false_friend", "countability", "missing_subject",
                                                          "verb_pattern", "question_form", "other")]
     assert positions == sorted(positions)
+
+
+def context_for(tmp_path, *language):
+    """The instruction for a prompt, with native_language set to `language` or, without it, left out."""
+    payload = {"prompt": "I want improve it", **({"native_language": language[0]} if language else {})}
+    return run("prompt_context.py", payload, tmp_path)["context"]
+
+
+def logged(home):
+    log = home / "errors.log"
+    return log.read_text() if log.exists() else ""
+
+
+@pytest.mark.parametrize("language", config.NATIVE_LANGUAGES)
+def test_prompt_context_names_the_native_language_it_is_given(tmp_path, language):
+    context = context_for(tmp_path, language)
+    assert context.startswith(f"The user is a {language} speaker writing prompts in English.")
+    assert f"{language} calques" in context
+    for other in set(config.NATIVE_LANGUAGES) - {language}:
+        assert other not in context
+    assert "native language" not in logged(tmp_path)
+
+
+def test_prompt_context_matches_the_native_language_without_regard_to_case(tmp_path):
+    assert context_for(tmp_path, " portuguese ").startswith("The user is a Portuguese speaker")
+
+
+def test_prompt_context_without_a_native_language_uses_spanish(tmp_path):
+    assert context_for(tmp_path).startswith("The user is a Spanish speaker")
+    assert context_for(tmp_path, "").startswith("The user is a Spanish speaker")
+    assert "native language" not in logged(tmp_path)
+
+
+def test_prompt_context_with_an_unknown_native_language_uses_spanish_and_logs_it(tmp_path):
+    assert context_for(tmp_path, "Klingon").startswith("The user is a Spanish speaker")
+    log = (tmp_path / "errors.log").read_text()
+    assert "unknown native language 'Klingon'; using Spanish" in log
+    assert "Spanish, Portuguese, French, Italian" in log
+
+
+def test_native_language_option_lists_the_languages_prompt_context_knows():
+    option = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())["userConfig"]["native_language"]
+    assert tuple(option["options"]) == config.NATIVE_LANGUAGES
+    assert option["default"] == config.DEFAULT_NATIVE_LANGUAGE
+
 
 
 def test_prompt_context_leaves_out_deleted_type(tmp_path):

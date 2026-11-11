@@ -4,7 +4,7 @@ import sys
 
 from conftest import ROOT, script_env
 
-from lib.db import connect, save_check
+from lib.db import VERSION, connect, save_check
 from lib.transcript import Check, Mistake
 
 
@@ -41,7 +41,7 @@ def test_top_on_newer_database_exits_with_the_reason_alone(tmp_path):
     result = subprocess.run([sys.executable, str(ROOT / "scripts" / "query.py"), "top"], capture_output=True, text=True,
                             env=script_env(tmp_path, CLAUDE_PLUGIN_DATA=str(tmp_path)), cwd=tmp_path)
     assert result.returncode == 1
-    assert result.stderr.strip() == ("grammar.db is at version 99, and this grammar tracker reads version 4 or older."
+    assert result.stderr.strip() == (f"grammar.db is at version 99, and this grammar tracker reads version {VERSION} or older."
                                      " Update the grammar-tracker mod.")
 
 

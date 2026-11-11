@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from lib.db import (ADDED_IN_2, VERSION, WORD_CHOICE_1, NewerDatabaseError, active_types, all_types, connect,
+from lib.db import (ADDED_IN_2, SPANISH_TEXTS_4, VERSION, WORD_CHOICE_1, NewerDatabaseError, active_types, all_types, connect,
                     save_check, top_mistakes)
 from lib.transcript import Check, Mistake
 
@@ -119,11 +119,11 @@ def occurrence_columns(conn):
     return [row[1] for row in conn.execute("PRAGMA table_info(occurrences)")]
 
 
-def test_new_database_has_seed_types_and_version_4_unused(tmp_path):
+def test_new_database_has_seed_types_at_version(tmp_path):
     conn = connect(tmp_path / "g.db")
     types = {t.key: t for t in all_types(conn)}
     assert list(types) == SEED_KEYS
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
     assert "reason" in occurrence_columns(conn)
     assert types["word_choice"].description == "A real English word that does not mean what you meant."
     assert types["false_friend"].example == '"actually" instead of "currently"'
@@ -179,7 +179,7 @@ def version_1_database(path, word_choice=WORD_CHOICE_1):
 def test_migration_from_2_adds_reason(tmp_path):
     version_2_database(tmp_path / "g.db").close()
     conn = connect(tmp_path / "g.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
     assert conn.execute("SELECT original_sentence, reason FROM occurrences").fetchall() == [("orig", None)]
     assert [o.reason for o in save(conn, "u2", check(m("article", "the", reason="a known remote")))] == [
         "a known remote"]
@@ -193,7 +193,7 @@ def test_migration_from_1_adds_types_before_other(tmp_path):
     assert [t.position for t in types] == list(range(1, 18))
     assert types[10].description == "A real English word that does not mean what you meant."
     assert conn.execute("SELECT type, identifier FROM mistakes").fetchall() == [("word_choice", "currently")]
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
     assert "reason" in occurrence_columns(conn)
 
 
@@ -208,7 +208,7 @@ def test_connect_twice_changes_nothing(tmp_path):
     connect(tmp_path / "g.db").close()
     conn = connect(tmp_path / "g.db")
     assert len(all_types(conn)) == 17
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
 
 
 def test_connect_on_migrated_database_from_second_connection_changes_nothing(tmp_path):
@@ -315,7 +315,7 @@ def version_3_database(path):
 def test_migration_from_3_adds_turn_id_and_keeps_prompts_linked(tmp_path):
     version_3_database(tmp_path / "g.db")
     conn = connect(tmp_path / "g.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
     assert conn.execute("SELECT id, turn_id, prompt_uuid, original FROM prompts").fetchall() == [
         (1, None, "u1", "original")]
     assert conn.execute("SELECT prompt_id FROM occurrences").fetchall() == [(1,)]
@@ -331,3 +331,41 @@ def test_migration_from_3_allows_prompts_without_uuid_and_dedupes_by_turn(tmp_pa
     assert save(conn, "t2", check(m("article", "the", 2))) is None
     assert conn.execute("SELECT turn_id, prompt_uuid FROM prompts ORDER BY id").fetchall() == [
         (None, "u1"), ("t2", None), ("t3", None)]
+
+
+def test_new_database_names_no_language_in_its_types(tmp_path):
+    for t in all_types(connect(tmp_path / "g.db")):
+        assert "Spanish" not in f"{t.description} {t.example} {t.identifier_rule}"
+
+
+def version_4_database(path, edited=None):
+    """Build a version 4 database: the types of SPANISH_TEXTS_4 with their version 4 text, and `edited`, when given,
+    with a description of its own."""
+    conn = connect(path)
+    for key, (description, identifier_rule) in SPANISH_TEXTS_4.items():
+        conn.execute("UPDATE mistake_types SET description = ?, identifier_rule = ? WHERE key = ?",
+                     (description if key != edited else "mine", identifier_rule, key))
+    conn.execute("PRAGMA user_version = 4")
+    conn.commit()
+    conn.close()
+
+
+def test_migration_from_4_removes_spanish_from_the_types(tmp_path):
+    version_4_database(tmp_path / "g.db")
+    conn = connect(tmp_path / "g.db")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
+    types = {t.key: t for t in all_types(conn)}
+    assert types["word_order"].description == ("Words in the order your native language uses instead of the order "
+                                               "English uses.")
+    assert types["word_order"].identifier_rule.startswith("the pattern the user was replicating from their native "
+                                                          "language")
+    assert types["false_friend"].description == ("An English word that looks like a word of your native language "
+                                                 "but means something else.")
+    assert types["missing_subject"].description == "A clause without its subject, which English always needs."
+
+
+def test_migration_from_4_keeps_an_edited_type(tmp_path):
+    version_4_database(tmp_path / "g.db", edited="false_friend")
+    types = {t.key: t for t in all_types(connect(tmp_path / "g.db"))}
+    assert types["false_friend"].description == "mine"
+    assert types["missing_subject"].description == "A clause without its subject, which English always needs."

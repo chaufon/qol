@@ -1,7 +1,8 @@
 # grammar-tracker
 
-Tracks the English mistakes in the prompts a Spanish speaker writes to Claude Code, counts how often each mistake
-repeats, and shows the check of the last prompt in a band above the prompt and in a `grammar` pane.
+Tracks the English mistakes in the prompts a Spanish, Portuguese, French or Italian speaker writes to Claude Code,
+counts how often each mistake repeats, and shows the check of the last prompt in a band above the prompt and in a
+`grammar` pane.
 
 ## Requirements
 
@@ -33,6 +34,20 @@ The same folder holds `errors.log`, where the mod writes any errors.
 ```
 
 The [marketplace README](../../README.md) has the shell command, updates and uninstalling.
+
+## Native language
+
+The `native_language` option names your native language: `Spanish` (the default), `Portuguese`, `French` or
+`Italian`. The grammar check looks for the mistakes speakers of that language make in English, such as its calques.
+Set it on the screen the install shows, or later in `/plugin` (manage the plugin, then configure it) or in `/config`.
+
+- While the option is unset, the check uses Spanish.
+- A value outside the list, such as a typo in `settings.json`, also gives Spanish, and `errors.log` gets a line that
+  names the value and the valid ones. Case does not matter: `french` is `French`.
+- The hooks module reads the option and passes it to `scripts/prompt_context.py` as `native_language`, which checks it
+  and names it in the grammar check instruction.
+- The languages are `NATIVE_LANGUAGES` in `scripts/lib/config.py` and the `options` of `userConfig.native_language` in
+  `.claude-plugin/plugin.json`. A test keeps the two equal.
 
 ## Skip the check for one prompt
 
@@ -178,7 +193,7 @@ Run it from the mod's folder, with `py -3` or `python` in place of `python3` whe
 | `hooks/register.test.ts` | Tests of the hooks module (`claude plugin test`) |
 | `tsconfig.json` | TypeScript settings for the type check |
 | `types/index.d.ts` | Type contract of the mod's `$.state` values |
-| `tests/` | pytest suite of the Python scripts |
+| `tests/` | pytest suite of the Python scripts, and the live tests of the grammar check (`test_live_check.py`) |
 
 ## Develop
 
@@ -192,7 +207,16 @@ npx -y -p typescript tsc -p plugins/grammar-tracker
 python3 -m pytest plugins/grammar-tracker
 ```
 
-`pytest` must be installed for the last command. The type check needs `plugins/grammar-tracker/.claude-plugin/types/`,
+`pytest` must be installed for the last command.
+
+`tests/test_live_check.py` tests the grammar check itself: it sends prompts with mistakes typical of each native
+language, and correct prompts, to Claude through `claude -p` with the mod loaded, and checks what the check reports.
+These tests cost tokens and depend on the model's answer, so pytest skips them unless `GRAMMAR_TRACKER_LIVE=1` is set.
+`GRAMMAR_TRACKER_LIVE_MODEL` picks the model. They write nothing to the real `grammar.db`.
+
+```
+GRAMMAR_TRACKER_LIVE=1 python3 -m pytest plugins/grammar-tracker/tests/test_live_check.py
+``` The type check needs `plugins/grammar-tracker/.claude-plugin/types/`,
 which Claude Code writes the first time it loads the mod.
 
 A session started with `--plugin-dir` uses the same data folder as an install, `grammar-tracker-qol/`.

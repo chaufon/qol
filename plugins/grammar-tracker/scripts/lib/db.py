@@ -61,9 +61,10 @@ SEED = (
      "The right tense built wrong: auxiliaries missing, extra or in the wrong place.",
      '"you have been at the mall?" instead of "have you been at the mall?"',
      'the auxiliaries in correct order ("have you been" for "you have been at the mall?")'),
-    ("word_order", "word order", "Words in the order Spanish uses instead of the order English uses.",
+    ("word_order", "word order", "Words in the order your native language uses instead of the order English uses.",
      '"the strategy of my cousin" instead of "my cousin\'s strategy"',
-     'the pattern the user was replicating from Spanish ("expressing belonging" for "the strategy of my cousin")'),
+     'the pattern the user was replicating from their native language ("expressing belonging" for "the strategy of '
+     'my cousin")'),
     ("native_expression", "native expression", "Correct English that a native speaker would say another way.",
      '"a practical course will be preferred" instead of "a hands-on course would be preferred"',
      'the correct native expression ("hands-on" for "a practical course")'),
@@ -79,14 +80,14 @@ SEED = (
     ("word_choice", "word choice", "A real English word that does not mean what you meant.",
      '"button" instead of "key"',
      'the correct word ("key" for "press the G button")'),
-    ("false_friend", "false friend", "An English word that looks like a Spanish word but means something else.",
+    ("false_friend", "false friend", "An English word that looks like a word of your native language but means something else.",
      '"actually" instead of "currently"',
      'the false friend used, never the correct word ("actually" for "I am actually working on it", meant as '
      '"currently")'),
     ("countability", "countability", "An uncountable noun used with a/an or in the plural.",
      '"a research" instead of "research"',
      'the noun in its correct form ("research" for "a research", "information" for "informations")'),
-    ("missing_subject", "missing subject", 'A clause without its subject, as Spanish allows ("es importante").',
+    ("missing_subject", "missing subject", "A clause without its subject, which English always needs.",
      '"is important" instead of "it is important"',
      'the missing subject ("it" for "is important to test")'),
     ("verb_pattern", "verb pattern",
@@ -101,12 +102,24 @@ SEED = (
     ("other", "other", "Any mistake that fits none of the types above.", None,
      "a short description of the mistake"),
 )
-VERSION = 4
+VERSION = 5
 # Types that version 2 adds, and the word_choice text of version 1 that version 2 rewrites.
 ADDED_IN_2 = ("false_friend", "countability", "missing_subject", "verb_pattern", "question_form")
 WORD_CHOICE_1 = ("A real English word that does not mean what you meant, false friends included.",
                  '"actually" instead of "currently"',
                  'the correct word, false friends included ("currently" for "actually")')
+# The (description, identifier_rule) of each type that names Spanish up to version 4, which version 5 rewrites to
+# name no language.
+SPANISH_TEXTS_4 = {
+    "word_order": ("Words in the order Spanish uses instead of the order English uses.",
+                   'the pattern the user was replicating from Spanish ("expressing belonging" for "the strategy of my '
+                   'cousin")'),
+    "false_friend": ("An English word that looks like a Spanish word but means something else.",
+                     'the false friend used, never the correct word ("actually" for "I am actually working on it", '
+                     'meant as "currently")'),
+    "missing_subject": ('A clause without its subject, as Spanish allows ("es importante").',
+                        'the missing subject ("it" for "is important to test")'),
+}
 
 
 class NewerDatabaseError(Exception):
@@ -177,6 +190,7 @@ def _migrate(conn):
             _add_types_of_2(conn)
         _add_reason(conn)
         _add_turn_id(conn)
+        _remove_spanish(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchall():
             raise sqlite3.IntegrityError("foreign key check failed after migration")
         conn.execute(f"PRAGMA user_version = {VERSION}")
@@ -221,6 +235,15 @@ def _add_types_of_2(conn):
     conn.execute("UPDATE mistake_types SET description = ?, example = ?, identifier_rule = ?"
                  " WHERE key = 'word_choice' AND description = ? AND example = ? AND identifier_rule = ?",
                  (*word_choice[2:], *WORD_CHOICE_1))
+
+def _remove_spanish(conn):
+    """Give the types of SPANISH_TEXTS_4 their version 5 text, which names no language. A type gets it only while it
+    still has its version 4 text, so edits stay."""
+    seed = {row[0]: row for row in SEED}
+    conn.executemany("UPDATE mistake_types SET description = ?, identifier_rule = ?"
+                     " WHERE key = ? AND description = ? AND identifier_rule = ?",
+                     [(seed[key][2], seed[key][4], key, *old) for key, old in SPANISH_TEXTS_4.items()])
+
 
 def _add_reason(conn):
     """Add the reason column of version 3 to occurrences. Occurrences saved before it have no reason."""
