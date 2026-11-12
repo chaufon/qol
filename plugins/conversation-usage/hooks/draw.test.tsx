@@ -222,12 +222,36 @@ test('the Prices tab lists every price of a model and the factors', async ($, on
   const all = await texts(ui)
   expect(all).toContain('USD per million tokens')
   expect(all).toContain('write 1h')
-  expect(all).toContain('claude-haiku-5-5')
+  expect(all).toContain('claude-fable-5-2')
+  expect(all).toContain('claude-haiku-5-5 >100,000')
   expect(all).toContain('$0.125')
-  expect(all).toContain('Fast mode on claude-opus-5-5 and claude-opus-5')
+  expect(all).toContain('$0.625')
+  expect(all).toContain('Built-in prices, read from platform.claude.com/docs/en/about-claude/pricing on 11 Nov 2026.')
+  expect(all).toContain('Fast mode on claude-fable-5-2, claude-mythos-5-2, claude-opus-5-5, claude-opus-5, claude-opus-4-8: every price x 2.')
   expect(all).toContain('• \nFast mode on')
   expect(all.split('\n').filter((l) => l.startsWith('-------'))).toHaveLength(2)
   expect(all).not.toContain('Tokens')
+  await ui.unmount()
+})
+
+test('the Prices tab shows the newest downloaded list, its dates and the last download error', async ($, on) => {
+  const since = new Date(2026, 10, 12, 9).getTime()
+  const rates = { input: 3, cacheWrite5m: 3.75, cacheWrite1h: 6, cacheRead: 0.15, output: 15 }
+  const prices = {
+    rows: [
+      { since: 0, model: 'claude-old-1', rates, fastFactor: null, longAbove: null, longRates: null },
+      { since, model: 'claude-opus-5-6', rates, fastFactor: null, longAbove: null, longRates: null },
+    ],
+    source: 'downloaded', since, checkedAt: new Date(2026, 10, 14, 9).getTime(), error: 'The pricing page answered 503',
+  }
+  seed(on, { ...base, tab: 'prices', prices })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const all = await texts(ui)
+  expect(all).toContain('claude-opus-5-6')
+  expect(all).not.toContain('claude-old-1')
+  expect(all).toContain('in effect since 12 Nov 2026, last checked 14 Nov 2026.')
+  expect(all).toContain('The last download failed: The pricing page answered 503')
+  expect(all).not.toContain('Fast mode on')
   await ui.unmount()
 })
 

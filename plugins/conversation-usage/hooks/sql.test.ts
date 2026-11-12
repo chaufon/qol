@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Request } from '../types'
-import { quote, toPrompt, toRequest, toUsage, upsertConversation, upsertPrompts, upsertRequests } from './sql'
+import { quote, repriceRequests, toPrompt, toRequest, toUsage, upsertConversation, upsertPrompts, upsertRequests } from './sql'
 
 const request = (model: string): Request => ({
   messageId: 'm1', requestId: 'r1', agentId: null, at: 1000, model, isFast: false,
@@ -24,15 +24,16 @@ test('quote refuses a number that is not finite', () => {
   expect(() => quote(NaN)).toThrow()
 })
 
-test('an unknown model is stored with NULL costs', () => {
-  const sql = upsertRequests('c1', [request('mystery-model')])
-  expect(sql).toContain('NULL, NULL, NULL, NULL')
+test('storing requests leaves the cost columns to repriceRequests', () => {
+  const sql = upsertRequests('c1', [request('claude-opus-5')])
   expect(sql).toContain('ON CONFLICT')
+  expect(sql).not.toContain('cost_')
 })
 
-test('a known model is stored with costs', () => {
-  const sql = upsertRequests('c1', [request('claude-opus-5')])
-  expect(sql).not.toContain('NULL, NULL, NULL, NULL')
+test('repriceRequests prices one conversation, or every request', () => {
+  expect(repriceRequests('c1')).toContain(`WHERE r.conversation_id = 'c1'`)
+  expect(repriceRequests(null)).not.toContain('WHERE r.conversation_id')
+  expect(repriceRequests(null)).toContain('UPDATE requests SET')
 })
 
 test('no rows give no statement', () => {

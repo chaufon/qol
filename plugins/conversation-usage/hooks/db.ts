@@ -1,11 +1,13 @@
 import type { EngineInterface } from 'claude-code'
 
-import type { Conversation, HistoryData, Usage, Window } from '../types'
+import type { Conversation, HistoryData, PriceBook, PriceRow, Usage, Window } from '../types'
+import { BUILT_IN, BUILT_IN_BOOK, BUILT_IN_CHECKED_AT, samePrices } from './prices'
 import { configDir } from './sync'
 import {
-  SCHEMA, selectConversation, selectHistory, selectPrompts, selectSlices, selectSubagents, selectWindows, selectWindowTotal,
-  toHistoryConversation, toPrompt, toRequest, toSlice, toSubagent, toUsage, toWindow,
-  upsertConversation, upsertPrompts, upsertRequests, upsertSubagents, upsertWindow,
+  repriceRequests, replacePriceList, SCHEMA, selectConversation, selectHistory, selectPriceLists, selectPrices, selectPrompts,
+  selectSlices, selectSubagents, selectWindows, selectWindowTotal, toHistoryConversation, toPriceList, toPriceRow, toPrompt,
+  toRequest, toSlice, toSubagent, toUsage, toWindow, touchPriceList, upsertConversation, upsertPrompts, upsertRequests,
+  upsertSubagents, upsertWindow,
 } from './sql'
 
 export type Db = { path: string }
@@ -40,6 +42,7 @@ export async function openDb($: EngineInterface): Promise<Db | { error: string }
   const db = { path: `${await configDir($)}/conversation-usage.db` }
   try {
     await run($, db, SCHEMA)
+    await run($, db, transaction([replacePriceList(0, 'built-in', BUILT_IN_CHECKED_AT, BUILT_IN), repriceRequests(null)]))
   } catch (error) {
     // A rejected call that is not a timeout means sqlite3 cannot start; every other failure keeps its own first line.
     const message = error instanceof Error ? error.message : String(error)
@@ -56,11 +59,43 @@ export async function query<T>($: EngineInterface, db: Db, sql: string, map: (ro
   return (await run($, db, sql)).map(map)
 }
 
+const transaction = (statements: string[]): string => `BEGIN;\n${statements.filter((s) => s !== '').join('\n')}\nCOMMIT;`
+
 export async function saveConversation($: EngineInterface, db: Db, c: Conversation): Promise<void> {
-  const statements = [
+  await exec($, db, transaction([
     upsertConversation(c), upsertSubagents(c.id, c.subagents), upsertRequests(c.id, c.requests), upsertPrompts(c.id, c.prompts),
-  ]
-  await exec($, db, `BEGIN;\n${statements.filter((s) => s !== '').join('\n')}\nCOMMIT;`)
+    repriceRequests(c.id),
+  ]))
+}
+
+// Every stored price row, and the newest price list; the built-in prices when none is stored.
+export async function loadPriceBook($: EngineInterface, db: Db): Promise<PriceBook> {
+  const [rows, lists] = await Promise.all([query($, db, selectPrices(), toPriceRow), query($, db, selectPriceLists(), toPriceList)])
+  if (rows.length === 0) return BUILT_IN_BOOK
+  const newest = lists[lists.length - 1]
+  return {
+    rows,
+    source: newest === undefined || newest.source === 'built-in' ? 'built-in' : 'downloaded',
+    since: newest?.since ?? 0,
+    checkedAt: newest?.checkedAt ?? BUILT_IN_CHECKED_AT,
+    error: null,
+  }
+}
+
+// Stores downloaded prices checked at `now`. Prices equal to the newest downloaded list only confirm it;
+// other prices start a new list in effect from `now`, and every stored request is priced again.
+export async function saveDownloadedPrices($: EngineInterface, db: Db, rows: PriceRow[], now: number): Promise<'confirmed' | 'changed'> {
+  const lists = await query($, db, selectPriceLists(), toPriceList)
+  const newest = lists.filter((l) => l.source === 'downloaded').pop()
+  if (newest !== undefined) {
+    const stored = (await query($, db, selectPrices(), toPriceRow)).filter((r) => r.since === newest.since)
+    if (samePrices(stored, rows)) {
+      await exec($, db, touchPriceList(newest.since, now))
+      return 'confirmed'
+    }
+  }
+  await exec($, db, transaction([replacePriceList(now, 'downloaded', now, rows), repriceRequests(null)]))
+  return 'changed'
 }
 
 export async function saveWindow($: EngineInterface, db: Db, w: Window): Promise<void> {

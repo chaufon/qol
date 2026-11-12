@@ -27,6 +27,14 @@ export const fmtPrice = (p: number): string => `$${p.toFixed(Math.round(p * 1000
 
 const pad = (n: number): string => String(n).padStart(2, '0')
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// "11 Nov 2026".
+export const fmtDay = (ms: number): string => {
+  const d = new Date(ms)
+  return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`
+}
+
 export const hhmm = (ms: number): string => {
   const d = new Date(ms)
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
