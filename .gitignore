@@ -8,3 +8,7 @@ plugins/*/.claude-plugin/types/
 __pycache__/
 .pytest_cache/
 /.playwright-mcp/
+node_modules/
+.venv/
+.claude/*
+!.claude/skills/

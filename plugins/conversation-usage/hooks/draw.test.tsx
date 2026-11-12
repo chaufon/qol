@@ -11,32 +11,61 @@ const PANE = {
   component: 'Pane',
   requestId: 'conversation-usage',
   props: {
-    title: 'Usage', isFocused: false, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {},
+    title: 'Usage',
+    isFocused: false,
+    bodyColumns: 80,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 30 },
+    view: {},
   },
 } as const
 
 const NOW = new Date(2026, 9, 28, 12, 0).getTime()
 const tok = (extra: Partial<Tokens>): Tokens => ({ ...ZERO_TOKENS, ...extra })
 const req = (id: string, at: number, extra: Partial<Request> = {}): Request => ({
-  messageId: `m${id}`, requestId: `r${id}`, agentId: null, at, model: 'claude-sonnet-5', isFast: false,
-  tokens: tok({ input: 100, output: 200 }), tools: [], toolUseIds: [], ...extra,
+  messageId: `m${id}`,
+  requestId: `r${id}`,
+  agentId: null,
+  at,
+  model: 'claude-sonnet-5',
+  isFast: false,
+  tokens: tok({ input: 100, output: 200 }),
+  tools: [],
+  toolUseIds: [],
+  ...extra,
 })
 const subagents: Subagent[] = [{ agentId: 'A', parentAgentId: null, name: 'Explore the code', toolUseId: 't1' }]
 const CONVERSATION: Conversation = {
-  id: 'c1', project: '/work/qol', title: 'Build the usage pane', startedAt: NOW - 3_600_000, subagents, prompts: [],
+  id: 'c1',
+  project: '/work/qol',
+  title: 'Build the usage pane',
+  startedAt: NOW - 3_600_000,
+  subagents,
+  prompts: [],
   requests: [
-    req('1', NOW - 3_000_000, { tools: ['Agent', 'Read'], toolUseIds: ['t1'], tokens: tok({ cacheWrite5m: 18_400, output: 300 }) }),
+    req('1', NOW - 3_000_000, {
+      tools: ['Agent', 'Read'],
+      toolUseIds: ['t1'],
+      tokens: tok({ cacheWrite5m: 18_400, output: 300 }),
+    }),
     req('2', NOW - 2_000_000, { model: 'mystery-model' }),
     req('a1', NOW - 2_900_000, { agentId: 'A', tools: ['Grep'] }),
   ],
 }
 const WINDOW = { kind: 'five_hour', start: NOW - 3_600_000, end: NOW + 3_600_000, percentUsed: 10 } as const
 const HISTORY: HistoryData = {
-  conversations: [{
-    id: 'c1', project: '/work/qol', title: 'Build the usage pane', startedAt: NOW - 3_600_000,
-    usage: { tokens: tok({ output: 500 }), cost: null }, requestCount: 3,
-  }],
-  windows: [WINDOW], slices: [],
+  conversations: [
+    {
+      id: 'c1',
+      project: '/work/qol',
+      title: 'Build the usage pane',
+      startedAt: NOW - 3_600_000,
+      usage: { tokens: tok({ output: 500 }), cost: null },
+      requestCount: 3,
+    },
+  ],
+  windows: [WINDOW],
+  slices: [],
 }
 
 // Stands for the engine's state: reads answer what was set, writes store it.
@@ -57,9 +86,13 @@ async function press($: Engine, ui: { redraw(): Promise<void> }, key: string) {
   await ui.redraw()
 }
 
-const base = { current: CONVERSATION, now: NOW, windowTotals: [{ window: WINDOW, usage: { tokens: tok({ output: 5 }), cost: null } }] }
+const base = {
+  current: CONVERSATION,
+  now: NOW,
+  windowTotals: [{ window: WINDOW, usage: { tokens: tok({ output: 5 }), cost: null } }],
+}
 const texts = async (ui: { findAll(q: { type: 'Text' }): Promise<{ text?: string | undefined }[]> }) =>
-  (await ui.findAll({ type: 'Text' })).map((t) => t.text ?? '').join('\n')
+  (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '').join('\n')
 // A row that starts with the triangle `arrow` and holds `label` a few cells later, ending with the count `count`.
 const row = (arrow: '▸' | '▾', label: string, count: number) =>
   new RegExp(`(^|\n)${arrow} \n(?:[^\n]*\n){0,3}${label}[^\n]*\n(?:[^\n]*\n){5} *${count}(\n|$)`)
@@ -109,7 +142,9 @@ test('the Both view draws the tokens line and the costs line', async ($, on) => 
 })
 
 test('barSegments splits by largest remainder and never loses a small bar', () => {
-  expect(barSegments({ input: 0, cacheWrite5m: 50, cacheWrite1h: 0, cacheRead: 50, output: 0 }, 100, 10)).toEqual([0, 5, 5, 0])
+  expect(barSegments({ input: 0, cacheWrite5m: 50, cacheWrite1h: 0, cacheRead: 50, output: 0 }, 100, 10)).toEqual([
+    0, 5, 5, 0,
+  ])
   const tiny = barSegments({ input: 1, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 }, 1_000_000, 10)
   expect(tiny.reduce((a, b) => a + b, 0)).toBe(1)
   const mix = barSegments({ input: 1, cacheWrite5m: 1, cacheWrite1h: 1, cacheRead: 1, output: 1 }, 5, 10)
@@ -134,10 +169,10 @@ test('History by date shows Today, the project heading and a collapsed conversat
 test('History draws a conversation on one row with no cards, and a dashed line under its project', async ($, on) => {
   seed(on, { ...base, tab: 'history', history: HISTORY })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  const conv = (await ui.findAll({ type: 'Button' })).filter((b) => b.text.includes('Build the usage pane'))
+  const conv = (await ui.findAll({ type: 'Button' })).filter(b => b.text.includes('Build the usage pane'))
   expect(conv).toHaveLength(1)
   expect(conv[0]!.text).toMatch(/^▸ \d\d:\d\d +Build the usage pane .* 3$/)
-  expect((await ui.findAll({ type: 'Box' })).some((b) => b.props.borderStyle !== undefined)).toBe(false)
+  expect((await ui.findAll({ type: 'Box' })).some(b => b.props.borderStyle !== undefined)).toBe(false)
   const all = await texts(ui)
   expect(all.indexOf(`  ${'-'.repeat(78)}`)).toBeGreaterThan(all.indexOf('qol'))
   await ui.unmount()
@@ -181,7 +216,10 @@ test('History with no stored conversations says so', async ($, on) => {
 })
 
 test('the Conversation tab lists prompts, the last one open, and a press closes it', async ($, on) => {
-  const prompts = [{ at: NOW - 3_100_000, text: 'Explore the repo' }, { at: NOW - 2_500_000, text: 'Write the fix' }]
+  const prompts = [
+    { at: NOW - 3_100_000, text: 'Explore the repo' },
+    { at: NOW - 2_500_000, text: 'Write the fix' },
+  ]
   seed(on, { ...base, current: { ...CONVERSATION, prompts } })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   let all = await texts(ui)
@@ -227,9 +265,11 @@ test('the Prices tab lists every price of a model and the factors', async ($, on
   expect(all).toContain('$0.125')
   expect(all).toContain('$0.625')
   expect(all).toContain('Built-in prices, read from platform.claude.com/docs/en/about-claude/pricing on 11 Nov 2026.')
-  expect(all).toContain('Fast mode on claude-fable-5-2, claude-mythos-5-2, claude-opus-5-5, claude-opus-5, claude-opus-4-8: every price x 2.')
+  expect(all).toContain(
+    'Fast mode on claude-fable-5-2, claude-mythos-5-2, claude-opus-5-5, claude-opus-5, claude-opus-4-8: every price x 2.',
+  )
   expect(all).toContain('• \nFast mode on')
-  expect(all.split('\n').filter((l) => l.startsWith('-------'))).toHaveLength(2)
+  expect(all.split('\n').filter(l => l.startsWith('-------'))).toHaveLength(2)
   expect(all).not.toContain('Tokens')
   await ui.unmount()
 })
@@ -242,7 +282,10 @@ test('the Prices tab shows the newest downloaded list, its dates and the last do
       { since: 0, model: 'claude-old-1', rates, fastFactor: null, longAbove: null, longRates: null },
       { since, model: 'claude-opus-5-6', rates, fastFactor: null, longAbove: null, longRates: null },
     ],
-    source: 'downloaded', since, checkedAt: new Date(2026, 10, 14, 9).getTime(), error: 'The pricing page answered 503',
+    source: 'downloaded',
+    since,
+    checkedAt: new Date(2026, 10, 14, 9).getTime(),
+    error: 'The pricing page answered 503',
   }
   seed(on, { ...base, tab: 'prices', prices })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -288,13 +331,22 @@ function answerHistory(on: On) {
   const rows = (sql: string) => {
     if (sql.includes('GROUP BY c.id')) {
       const [c] = HISTORY.conversations
-      return [{ id: c!.id, project: c!.project, title: c!.title, started_at: c!.startedAt, request_count: 3, output: 500 }]
+      return [
+        { id: c!.id, project: c!.project, title: c!.title, started_at: c!.startedAt, request_count: 3, output: 500 },
+      ]
     }
-    if (sql.includes('FROM windows ORDER')) return [{ kind: WINDOW.kind, start: WINDOW.start, end: WINDOW.end, percent_used: 10 }]
+    if (sql.includes('FROM windows ORDER'))
+      return [{ kind: WINDOW.kind, start: WINDOW.start, end: WINDOW.end, percent_used: 10 }]
     return []
   }
   on('process.run', (_, e) => ({
-    value: { exitCode: 0, stdout: JSON.stringify(rows(e.init?.stdin ?? '')), stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+    value: {
+      exitCode: 0,
+      stdout: JSON.stringify(rows(e.init?.stdin ?? '')),
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
   }))
   return clock
 }
@@ -325,7 +377,7 @@ test('a dashed rule is under the column names and over the totals', async ($, on
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const all = await texts(ui)
   const rule = '  -- ----- ------------------------  ------- ------- ------- ------- ------- ---'
-  expect(all.split('\n').filter((l) => l === rule)).toHaveLength(2)
+  expect(all.split('\n').filter(l => l === rule)).toHaveLength(2)
   expect(all.indexOf(rule)).toBeGreaterThan(all.indexOf('prompt / tools'))
   expect(all.lastIndexOf(rule)).toBeLessThan(all.indexOf('Conversation      '))
   await ui.unmount()
@@ -335,13 +387,14 @@ test('the footer holds the keys of the tab on show, on the last row the pane sho
   seed(on, { ...base, history: HISTORY })
   answerHistory(on)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  const labels = async () => (await ui.findAll({ type: 'Button' })).filter((b) => b.props.hotkey !== undefined).map((b) => b.text)
+  const labels = async () =>
+    (await ui.findAll({ type: 'Button' })).filter(b => b.props.hotkey !== undefined).map(b => b.text)
   expect(await labels()).toEqual(['Tab', 'View', 'Hide'])
   await press($, ui, 'tab-history')
   expect(await labels()).toEqual(['Tab', 'View', 'Group', 'Hide'])
   await press($, ui, 'tab-next')
   expect(await labels()).toEqual(['Tab', 'Hide'])
-  const footer = (await ui.findAll({ type: 'Box' })).find((b) => b.props.position === 'absolute')
+  const footer = (await ui.findAll({ type: 'Box' })).find(b => b.props.position === 'absolute')
   expect(footer?.props.top).toBe(28)
   expect(footer?.text.startsWith('─'.repeat(80))).toBe(true)
   await ui.unmount()
@@ -350,7 +403,7 @@ test('the footer holds the keys of the tab on show, on the last row the pane sho
 test('the view and grouping switches sit at the bottom, over the keys', async ($, on) => {
   seed(on, { ...base, tab: 'history', history: HISTORY })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  const footer = (await ui.findAll({ type: 'Box' })).find((b) => b.props.position === 'absolute')
+  const footer = (await ui.findAll({ type: 'Box' })).find(b => b.props.position === 'absolute')
   expect(footer?.props.top).toBe(26)
   const text = footer?.text ?? ''
   expect(text.indexOf('Tokens')).toBeLessThan(text.indexOf('Date'))

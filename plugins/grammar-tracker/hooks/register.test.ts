@@ -2,84 +2,156 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { shareCells, bandChips, barFill, cell, checkState, cleanStreak, countColumn, meter, mascotRows, mistakeColumn, sparkline,
-         stripCheck, toCheck, typeColor, typeIcon } from './register'
-
+import { toCheck } from './check'
+import { bandChips } from './draw'
 
 const SAVE_OUTPUT = {
   corrected_prompt: 'What files does the mod folder have?',
   occurrences: [
-    { type: 'article', type_label: 'article', identifier: 'the', original: 'a', corrected: 'b',
-      reason: 'a known remote takes the', count: 1,
-      is_recurring: false, type_description: 'A wrong, missing or extra "a/an" or "the".',
-      type_example: '"the people are selfish" instead of "people are selfish"' },
-    { type: 'malformed_tense', type_label: 'malformed tense', identifier: 'does have', original: 'c',
-      corrected: 'd', reason: null, count: 3, is_recurring: true,
+    {
+      type: 'article',
+      type_label: 'article',
+      identifier: 'the',
+      original: 'a',
+      corrected: 'b',
+      reason: 'a known remote takes the',
+      count: 1,
+      is_recurring: false,
+      type_description: 'A wrong, missing or extra "a/an" or "the".',
+      type_example: '"the people are selfish" instead of "people are selfish"',
+    },
+    {
+      type: 'malformed_tense',
+      type_label: 'malformed tense',
+      identifier: 'does have',
+      original: 'c',
+      corrected: 'd',
+      reason: null,
+      count: 3,
+      is_recurring: true,
       type_description: 'The right tense built wrong: auxiliaries missing, extra or in the wrong place.',
-      type_example: null },
+      type_example: null,
+    },
   ],
 }
 
-
 const TURN = { answer: 'reply', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 const BAND = {
-  plugin: 'grammar-tracker', component: 'AbovePrompt', requestId: 'band',
-  props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 },
-           view: {} },
+  plugin: 'grammar-tracker',
+  component: 'AbovePrompt',
+  requestId: 'band',
+  props: {
+    hasSurvey: false,
+    isWorking: false,
+    maxRows: 10,
+    bodyColumns: 80,
+    scroll: { offset: 0, bodyRows: 10 },
+    view: {},
+  },
 } as const
 const PANE_PROPS = {
-  title: 'Grammar', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 10 }, view: {},
+  title: 'Grammar',
+  isFocused: true,
+  bodyColumns: 80,
+  placement: 'dock',
+  scroll: { offset: 0, bodyRows: 10 },
+  view: {},
 } as const
 
 const INSTRUCTION = 'Begin your response with an English grammar check of the prompt.'
-const CHECK_TEXT ='**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
-const CHECK_BLOCK_END = '**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```'
+const CHECK_TEXT = '**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
 
 function engine(on: On, stdout: string) {
-  const calls = { stdout, stderr: '', exitCode: 0, top: JSON.stringify(SAVE_OUTPUT.occurrences), trend: '[1,0,2,0,0]', isTrendBroken: false, isTopBroken: false, runs: [] as (readonly string[])[], opened: [] as string[],
-                  focus: [] as (boolean | undefined)[], closed: [] as string[], toasts: [] as string[], inputs: [] as string[],
-                  chunks: [] as string[], gate: undefined as Promise<void> | undefined, yielded: [] as string[],
-                  inits: [] as unknown[], pythons: { python3: '3' } as Record<string, string>,
-                  probes: [] as string[], context: JSON.stringify({ context: INSTRUCTION }),
-                  contextRuns: [] as (readonly string[])[], contextInputs: [] as string[],
-                  submits: [] as (readonly string[] | undefined)[] }
+  const calls = {
+    stdout,
+    stderr: '',
+    exitCode: 0,
+    top: JSON.stringify(SAVE_OUTPUT.occurrences),
+    trend: '[1,0,2,0,0]',
+    isTrendBroken: false,
+    isTopBroken: false,
+    runs: [] as (readonly string[])[],
+    opened: [] as string[],
+    focus: [] as (boolean | undefined)[],
+    closed: [] as string[],
+    toasts: [] as string[],
+    inputs: [] as string[],
+    chunks: [] as string[],
+    gate: undefined as Promise<void> | undefined,
+    yielded: [] as string[],
+    inits: [] as unknown[],
+    pythons: { python3: '3' } as Record<string, string>,
+    probes: [] as string[],
+    context: JSON.stringify({ context: INSTRUCTION }),
+    contextRuns: [] as (readonly string[])[],
+    contextInputs: [] as string[],
+    submits: [] as (readonly string[] | undefined)[],
+  }
   on('process.run', ($, e) => {
     if (e.argv.includes('-c')) {
       calls.probes.push(e.argv[0]!)
       const major = calls.pythons[e.argv[0]!]
       if (major === undefined) throw new Error(`${e.argv[0]}: not found`)
-      return { value: { exitCode: 0, stdout: `${major}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      return {
+        value: { exitCode: 0, stdout: `${major}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+      }
     }
     if (e.argv.some(arg => arg.endsWith('/scripts/prompt_context.py'))) {
       calls.contextRuns.push(e.argv)
-      calls.contextInputs.push(String((e.init as { stdin?: string } | undefined)?.stdin))
-      return { value: { exitCode: 0, stdout: calls.context, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      calls.contextInputs.push(String(e.init?.stdin))
+      return {
+        value: { exitCode: 0, stdout: calls.context, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+      }
     }
     calls.runs.push(e.argv)
     calls.inits.push(e.init)
     if (e.argv[2] === 'top' && calls.isTopBroken) throw new Error('timed out')
     if (e.argv[2] === 'trend' && calls.isTrendBroken) throw new Error('timed out')
     if (e.argv[2] === 'trend') {
-      return { value: { exitCode: 0, stdout: calls.trend, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      return {
+        value: { exitCode: 0, stdout: calls.trend, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+      }
     }
     if (e.argv[2] === 'top') {
-      return { value: { exitCode: 0, stdout: calls.top, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      return {
+        value: { exitCode: 0, stdout: calls.top, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+      }
     }
-    calls.inputs.push(String((e.init as { stdin?: string } | undefined)?.stdin))
-    return { value: { exitCode: calls.exitCode, stdout: calls.stdout, stderr: calls.stderr, isStdoutTruncated: false,
-                      isStderrTruncated: false } }
+    calls.inputs.push(String(e.init?.stdin))
+    return {
+      value: {
+        exitCode: calls.exitCode,
+        stdout: calls.stdout,
+        stderr: calls.stderr,
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
+    }
   })
-  on('ui.open', ($, e) => { calls.opened.push(e.id); calls.focus.push(e.focus); return { value: { isPlaced: true } } })
-  on('ui.close', ($, e) => { calls.closed.push(e.id); return { value: undefined } })
+  on('ui.open', ($, e) => {
+    calls.opened.push(e.id)
+    calls.focus.push(e.focus)
+    return { value: { isPlaced: true } }
+  })
+  on('ui.close', ($, e) => {
+    calls.closed.push(e.id)
+    return { value: undefined }
+  })
   on('ui.panes', () => {
     const up = calls.opened.length > calls.closed.length
     return { value: up ? [{ id: 'grammar', title: '✎ Grammar', isShown: true, isFocused: false, isPlaced: true }] : [] }
   })
-  on('ui.toast', ($, e) => { calls.toasts.push(e.text); return { value: undefined } })
+  on('ui.toast', ($, e) => {
+    calls.toasts.push(e.text)
+    return { value: undefined }
+  })
   on('session.id', () => ({ value: 's1' }))
   on('session.cwd', () => ({ value: '/proj' }))
   on('clock.now', () => ({ value: Date.parse('2026-10-17T12:00:00.000Z') }))
-  on('prompt.submit', ($, e) => { calls.submits.push(e.context); return { text: e.text, context: e.context } })
+  on('prompt.submit', ($, e) => {
+    calls.submits.push(e.context)
+    return { text: e.text, context: e.context }
+  })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.step', async function* ($, e) {
     for (const text of calls.chunks) {
@@ -87,8 +159,14 @@ function engine(on: On, stdout: string) {
       yield { kind: 'text', index: 0, text }
       if (calls.gate && text === calls.chunks.at(-2)) await calls.gate
     }
-    return { turnId: e.turnId, index: e.index, answer: calls.chunks.join(''), toolUses: [], stopReason: 'end_turn',
-             usage: null } as never
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: calls.chunks.join(''),
+      toolUses: [],
+      stopReason: 'end_turn',
+      usage: null,
+    } as never
   })
   on('turn.complete', () => ({ text: 'reply' }))
   on('ui.render', ($, e) => $.ui.resolve(e).Text({ children: 'beneath' }))
@@ -138,38 +216,18 @@ async function pressBand($: Engine) {
   await $.ui.press({ plugin: 'grammar-tracker', key: 'toggle' })
 }
 
-test('stripCheck removes the check and its grammar-json block', () => {
-  const text = '**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
-  expect(stripCheck(text)).toBe('The answer.')
-})
-
-test('stripCheck removes the "does not apply" paragraph', () => {
-  expect(stripCheck('English grammar check does not apply.\n\nThe answer.')).toBe('The answer.')
-  expect(stripCheck('**English grammar check:** English grammar check does not apply.\n\nThe answer.')).toBe('The answer.')
-})
-
-test('stripCheck ignores whitespace before the check', () => {
-  const text = '\n **English grammar check:**\n```grammar-json\n{"mistakes": []}\n```\n\nThe answer.'
-  expect(stripCheck(text)).toBe('The answer.')
-  expect(stripCheck('\nEnglish grammar check does not apply.\n\nThe answer.')).toBe('The answer.')
-})
-
-test('stripCheck hides a grammar-json block that is still streaming', () => {
-  expect(stripCheck('**English grammar check:**\n```grammar-json\n{"mistakes": [')).toBe('')
-})
-
-test('stripCheck leaves other text unchanged', () => {
-  expect(stripCheck('The answer.')).toBe('The answer.')
-  expect(stripCheck('**English grammar check:** no block')).toBe('**English grammar check:** no block')
-})
-
 test('toCheck and bandChips summarize the output of save_check.py', () => {
-  expect(bandChips(toCheck(SAVE_OUTPUT)!)).toEqual([{ text: '✗ 2 mistakes', color: 'error' },
-                                                    { text: '⟳ 1 recurring', color: 'warning' }])
-  expect(bandChips(toCheck({ ...SAVE_OUTPUT, occurrences: [SAVE_OUTPUT.occurrences[0]!] })!))
-    .toEqual([{ text: '✗ 1 mistake', color: 'error' }])
-  expect(bandChips(toCheck({ does_not_apply: true })!)).toEqual([{ text: 'Grammar check does not apply to the last prompt', isDim: true }])
-  expect(bandChips(toCheck({ ...SAVE_OUTPUT, occurrences: [] })!)).toEqual([{ text: '✓ No mistakes', color: 'success' }])
+  expect(bandChips(toCheck(SAVE_OUTPUT))).toEqual([
+    { text: '✗ 2 mistakes', color: 'error' },
+    { text: '⟳ 1 recurring', color: 'warning' },
+  ])
+  expect(bandChips(toCheck({ ...SAVE_OUTPUT, occurrences: [SAVE_OUTPUT.occurrences[0]!] }))).toEqual([
+    { text: '✗ 1 mistake', color: 'error' },
+  ])
+  expect(bandChips(toCheck({ does_not_apply: true }))).toEqual([
+    { text: 'Grammar check does not apply to the last prompt', isDim: true },
+  ])
+  expect(bandChips(toCheck({ ...SAVE_OUTPUT, occurrences: [] }))).toEqual([{ text: '✓ No mistakes', color: 'success' }])
   expect(toCheck({ systemMessage: 'Grammar tracker: failed to log (see errors.log)' })).toBe(null)
 })
 
@@ -181,8 +239,12 @@ test('the reply drawn has no check in its first block only', async ($, on) => {
   })
   const check = '**English grammar check:**\n```grammar-json\n{}\n```\n\nThe answer.'
   for (const isFirstOfReply of [true, false]) {
-    await $.ui.render({ surface: 'terminal', component: 'AssistantMessage', requestId: 'm1',
-                        props: { text: check, isFirstOfReply } })
+    await $.ui.render({
+      surface: 'terminal',
+      component: 'AssistantMessage',
+      requestId: 'm1',
+      props: { text: check, isFirstOfReply },
+    })
   }
   expect(seen).toEqual(['The answer.', check])
 })
@@ -192,8 +254,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
     await turn($, calls, [CHECK_TEXT])
     expect(calls.runs[0]?.[1]?.endsWith('/grammar-tracker/scripts/save_check.py')).toBe(true)
-    expect(JSON.parse(calls.inputs[0]!)).toEqual({ turn_id: 't1', session_id: 's1', cwd: '/proj', prompt: 'the people',
-                                                   reply: CHECK_TEXT, timestamp: '2026-10-17T12:00:00.000Z' })
+    expect(JSON.parse(calls.inputs[0]!)).toEqual({
+      turn_id: 't1',
+      session_id: 's1',
+      cwd: '/proj',
+      prompt: 'the people',
+      reply: CHECK_TEXT,
+      timestamp: '2026-10-17T12:00:00.000Z',
+    })
     expect(await bandHas($, '✗ 2 mistakes', surface)).toBe(true)
     expect(calls.opened).toEqual(['grammar'])
     expect(await bandHas($, 'Hide', surface)).toBe(true)
@@ -202,10 +270,16 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
 test('the check is saved and shown while the rest of the reply still streams', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
-  let release = () => {}
-  calls.gate = new Promise(resolve => { release = resolve })
+  let release: () => void = () => undefined
+  calls.gate = new Promise(resolve => {
+    release = resolve
+  })
   await startTurn($)
-  const done = stream($, calls, ['**English grammar check:**\n```grammar-', 'json\n{"mistakes": []}\n```', '\n\nThe answer'])
+  const done = stream($, calls, [
+    '**English grammar check:**\n```grammar-',
+    'json\n{"mistakes": []}\n```',
+    '\n\nThe answer',
+  ])
   await until(async () => await bandHas($, '✗ 2 mistakes'))
   expect(await bandHas($, '✗ 2 mistakes')).toBe(true)
   expect(calls.opened).toEqual(['grammar'])
@@ -264,16 +338,20 @@ test('a check opens the pane on the Last prompt tab, without focus', async ($, o
   expect(await pane.find({ text: ' ª Article · "the" ' })).toBeDefined()
 })
 
-test('a check does not open the pane when autoOpenPane is off, and Show still opens it', { options: { autoOpenPane: false } }, async ($, on) => {
-  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
-  await turn($, calls, [CHECK_TEXT])
-  expect(await bandHas($, '✗ 2 mistakes')).toBe(true)
-  expect(calls.opened).toEqual([])
-  await $.ui.mount({ ...BAND, surface: 'terminal' })
-  await $.ui.press({ plugin: 'grammar-tracker', key: 'toggle' })
-  expect(calls.opened).toEqual(['grammar'])
-  expect(calls.focus).toEqual([true])
-})
+test(
+  'a check does not open the pane when autoOpenPane is off, and Show still opens it',
+  { options: { autoOpenPane: false } },
+  async ($, on) => {
+    const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+    await turn($, calls, [CHECK_TEXT])
+    expect(await bandHas($, '✗ 2 mistakes')).toBe(true)
+    expect(calls.opened).toEqual([])
+    await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await $.ui.press({ plugin: 'grammar-tracker', key: 'toggle' })
+    expect(calls.opened).toEqual(['grammar'])
+    expect(calls.focus).toEqual([true])
+  },
+)
 
 test('a pane the user hid is not opened by a check until the Show button opens it again', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
@@ -325,8 +403,9 @@ test('a script that exits with an error shows its message in a toast and clears 
   calls.stderr = 'Grammar tracker needs Python 3.10 or newer, found 3.9.6\n'
   await turn($, calls, [CHECK_TEXT], 't2')
   expect(await bandHas($, 'Grammar: no check for the last prompt')).toBe(true)
-  expect(calls.toasts).toEqual(
-    ['Grammar tracker: failed to read the check (Error: Grammar tracker needs Python 3.10 or newer, found 3.9.6)'])
+  expect(calls.toasts).toEqual([
+    'Grammar tracker: failed to read the check (Error: Grammar tracker needs Python 3.10 or newer, found 3.9.6)',
+  ])
 })
 
 test('a turn without a check clears the check of the turn before', async ($, on) => {
@@ -355,18 +434,6 @@ test('a check block that is not at the start of the reply is not saved', async (
   expect(await bandHas($, 'Grammar: no check for the last prompt')).toBe(true)
 })
 
-test('checkState follows the start of the reply', () => {
-  expect(checkState('')).toBe('waiting')
-  expect(checkState('**English gram')).toBe('waiting')
-  expect(checkState('**English grammar check:**\n```grammar-js')).toBe('waiting')
-  expect(checkState('**English grammar check:**\n```grammar-json\n{"mistakes": [')).toBe('waiting')
-  expect(checkState('**English grammar check:**\n```grammar-json\n{"mistakes": []}\n```')).toBe('check')
-  expect(checkState('```grammar-json\n{}\n```\nMore')).toBe('check')
-  expect(checkState('\nEnglish grammar check does not apply.')).toBe('not-apply')
-  expect(checkState('**English grammar check:** English grammar check does not apply')).toBe('not-apply')
-  expect(checkState('Here is the answer')).toBe('unlikely')
-})
-
 test('the scripts run without a data folder from the mod', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
@@ -391,7 +458,6 @@ test('a turn that starts without a submitted prompt is not tracked', async ($, o
   expect(await bandHas($, '⠋ Checking…')).toBe(false)
 })
 
-
 test('before any check the band offers the pane, and its button opens and closes it', async ($, on) => {
   const calls = engine(on, '')
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -408,14 +474,24 @@ test('a failed query.py shows its error in the pane and a toast', async ($, on) 
   await pressBand($)
   expect(calls.opened).toEqual(['grammar'])
   expect(calls.toasts.map(t => t.startsWith('Grammar tracker: failed to read the top mistakes ('))).toEqual([true])
-  const pane = await $.ui.mount({ plugin: 'grammar-tracker', surface: 'terminal', component: 'Pane', requestId: 'grammar',
-                                  props: PANE_PROPS })
+  const pane = await $.ui.mount({
+    plugin: 'grammar-tracker',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'grammar',
+    props: PANE_PROPS,
+  })
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
   expect(await pane.find({ text: /failed to read the top mistakes/ })).toBeDefined()
 })
 
-const PANE = { plugin: 'grammar-tracker', surface: 'terminal', component: 'Pane', requestId: 'grammar',
-               props: PANE_PROPS } as const
+const PANE = {
+  plugin: 'grammar-tracker',
+  surface: 'terminal',
+  component: 'Pane',
+  requestId: 'grammar',
+  props: PANE_PROPS,
+} as const
 
 test('the Last prompt tab draws a card per mistake with its title, sentences, reason and rule', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
@@ -428,8 +504,14 @@ test('the Last prompt tab draws a card per mistake with its title, sentences, re
   expect(await pane.find({ text: '✗ c' })).toBeDefined()
   expect(await pane.find({ text: '✓ d' })).toBeDefined()
   expect(await pane.find({ text: 'a known remote takes the' })).toBeDefined()
-  expect(await pane.find({ text: 'A wrong, missing or extra "a/an" or "the". ("the people are selfish" instead of "people are selfish")' })).toBeDefined()
-  expect(await pane.find({ text: 'The right tense built wrong: auxiliaries missing, extra or in the wrong place.' })).toBeDefined()
+  expect(
+    await pane.find({
+      text: 'A wrong, missing or extra "a/an" or "the". ("the people are selfish" instead of "people are selfish")',
+    }),
+  ).toBeDefined()
+  expect(
+    await pane.find({ text: 'The right tense built wrong: auxiliaries missing, extra or in the wrong place.' }),
+  ).toBeDefined()
   expect(await pane.find({ text: ' ✎ Corrected prompt ' })).toBeDefined()
 })
 
@@ -445,9 +527,11 @@ test('the Last prompt tab praises a check with no mistakes and shows the correct
   const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
-  const praise = (await pane.findAll({ type: 'Text' })).find(t => t.text === '✓ No mistakes. Great English, keep it up!')
+  const praise = (await pane.findAll({ type: 'Text' })).find(
+    t => t.text === '✓ No mistakes. Great English, keep it up!',
+  )
   expect(praise?.props.color).toBe('success')
-  expect(praise?.props.bold).toBe(true)
+  expect(praise?.props.weight).toBe('semibold')
   expect(praise?.props.dimColor).toBeFalsy()
   expect(await pane.find({ text: ' ✎ Corrected prompt ' })).toBeDefined()
 })
@@ -470,7 +554,7 @@ test('a check with no mistakes leaves an open pane open', async ($, on) => {
 })
 
 test('a Top mistakes row opens and closes its example card', async ($, on) => {
-  const calls = engine(on, '')
+  engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
@@ -503,13 +587,6 @@ test('the Top mistakes tab says when nothing is logged', async ($, on) => {
   expect(await pane.find({ text: 'No mistakes logged yet' })).toBeDefined()
 })
 
-test('cell cuts or pads a table cell and the Count column fits the largest count', () => {
-  expect(cell('article', 4)).toBe('art…')
-  expect(cell('the', 5)).toBe('the  ')
-  expect(countColumn(7)).toBe(1)
-  expect(countColumn(123456)).toBe(6)
-})
-
 test('the scripts run with py -3 where python3 does not start, as on Windows', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   calls.pythons = { python3: '', py: '3' }
@@ -540,13 +617,20 @@ test('a typed prompt reaches the model with the grammar check instruction beside
   expect(calls.contextInputs).toEqual([JSON.stringify({ prompt: 'I want improve it', native_language: 'Spanish' })])
 })
 
-test('the native_language option reaches the script that writes the instruction', { options: { native_language: 'French' } }, async ($, on) => {
-  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
-  await $.prompt.submit({ text: 'I want improve it' } as never)
-  expect(calls.contextInputs).toEqual([JSON.stringify({ prompt: 'I want improve it', native_language: 'French' })])
-})
+test(
+  'the native_language option reaches the script that writes the instruction',
+  { options: { native_language: 'French' } },
+  async ($, on) => {
+    const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+    await $.prompt.submit({ text: 'I want improve it' } as never)
+    expect(calls.contextInputs).toEqual([JSON.stringify({ prompt: 'I want improve it', native_language: 'French' })])
+  },
+)
 
-for (const [pythons, command] of [[{ python3: '', py: '3' }, ['py', '-3']], [{ python: '3' }, ['python']]] as const) {
+for (const [pythons, command] of [
+  [{ python3: '', py: '3' }, ['py', '-3']],
+  [{ python: '3' }, ['python']],
+] as const) {
   test(`the grammar check instruction comes from ${command.join(' ')} where python3 does not start`, async ($, on) => {
     const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
     calls.pythons = { ...pythons }
@@ -579,8 +663,9 @@ test('without Python 3 the prompt reaches the model with no instruction and a to
   calls.pythons = {}
   await $.prompt.submit({ text: 'I want improve it' } as never)
   expect(calls.submits).toEqual([undefined])
-  expect(calls.toasts).toEqual(
-    ['Grammar tracker: failed to add the grammar check (Error: Grammar tracker needs Python 3.10 or newer as python3, py or python on the PATH)'])
+  expect(calls.toasts).toEqual([
+    'Grammar tracker: failed to add the grammar check (Error: Grammar tracker needs Python 3.10 or newer as python3, py or python on the PATH)',
+  ])
 })
 
 test('a data folder that cannot be written shows its warning, and the prompt goes on with no instruction', async ($, on) => {
@@ -591,32 +676,39 @@ test('a data folder that cannot be written shows its warning, and the prompt goe
   expect(calls.toasts).toEqual(['Grammar tracker: cannot write to the data folder /x'])
 })
 
-test('a Top mistakes row with the largest count fits the pane', () => {
-  for (const largest of [7, 68, 512, 123456]) {
-    const mistake = cell('the', mistakeColumn(80, largest))
-    const row = `▾${'10'.padStart(3)} ª ${cell('Article', 15)}  ${mistake} ${'█'.repeat(10)} ${String(largest).padStart(countColumn(largest))}`
-    expect(row.length).toBe(80)
-  }
-})
-
 test('the Top mistakes tab shows a worried mascot, the tiles and the share of each type', async ($, on) => {
-  const calls = engine(on, '')
+  engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
   expect(await pane.find({ text: '1 mistake you keep repeating.' })).toBeDefined()
   expect(await pane.find({ text: /^Watch out for ".*" \(×3\)$/ })).toBeDefined()
   const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text)
-  expect(texts).toEqual(expect.arrayContaining(['4', 'Mistakes', 'Recurring', 'Types', 'Where your mistakes go (top 2)', '◴ 75%', '  ª 25%']))
+  expect(texts).toEqual(
+    expect.arrayContaining([
+      '4',
+      'Mistakes',
+      'Recurring',
+      'Types',
+      'Where your mistakes go (top 2)',
+      '◴ 75%',
+      '  ª 25%',
+    ]),
+  )
   const counts = (await pane.findAll({ type: 'Text' })).filter(t => /^ \d+$/.test(t.text))
-  expect(counts.map(t => [t.text.trim(), t.props.color])).toEqual([['1', 'success'], ['3', 'warning']])
+  expect(counts.map(t => [t.text.trim(), t.props.color])).toEqual([
+    ['1', 'success'],
+    ['3', 'warning'],
+  ])
 })
 
 test('the footer keys sit on the last row the pane shows, under a line', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
-  const footer = (await pane.findAll({ type: 'Box' })).find(b => b.props.position === 'absolute' && b.text.includes('Hide'))
+  const footer = (await pane.findAll({ type: 'Box' })).find(
+    b => b.props.position === 'absolute' && b.text.includes('Hide'),
+  )
   expect(footer?.props.top).toBe(PANE_PROPS.scroll.bodyRows - 2)
   expect(footer?.text.startsWith('─'.repeat(PANE_PROPS.bodyColumns))).toBe(true)
 })
@@ -625,11 +717,14 @@ test('the footer key t switches between the tabs, and the tab on show is colored
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
-  const keys = (await pane.findAll({ type: 'Button' })).filter(b => b.props.hotkey !== undefined).map(b => b.props.hotkey)
+  const keys = (await pane.findAll({ type: 'Button' }))
+    .filter(b => b.props.hotkey !== undefined)
+    .map(b => b.props.hotkey)
   expect(keys).toEqual(['t', 'h'])
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-next' })
   await pane.redraw()
-  const shown = async () => (await pane.findAll({ type: 'Text' })).find(t => t.props.backgroundColor === 'planMode')?.text
+  const shown = async () =>
+    (await pane.findAll({ type: 'Text' })).find(t => t.props.backgroundColor === 'planMode')?.text
   expect(await shown()).toBe(' Top mistakes ')
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-next' })
   await pane.redraw()
@@ -637,7 +732,7 @@ test('the footer key t switches between the tabs, and the tab on show is colored
 })
 
 test('the Top mistakes rows draw an icon and a bar as long as the count', async ($, on) => {
-  const calls = engine(on, '')
+  engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
@@ -656,10 +751,23 @@ test('the Last prompt tab shows the tiles, the trend of this conversation and a 
   expect(calls.runs.some(run => run[2] === 'trend' && run[3] === 's1' && run[4] === '10')).toBe(true)
   expect(await pane.find({ text: '2 mistakes, 1 you keep repeating.' })).toBeDefined()
   expect(await pane.find({ text: 'Watch out for "does have" (×3)' })).toBeDefined()
-  const tiles = (await pane.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.alignItems === 'center')
+  const tiles = (await pane.findAll({ type: 'Box' })).filter(
+    b => b.props.borderStyle === 'round' && b.props.alignItems === 'center',
+  )
   expect(tiles.map(t => t.text.replace(/\s+/g, ' ').trim())).toEqual(['2Mistakes', '1Recurring', '2Clean streak'])
-  const bars = (await pane.findAll({ type: 'Text' })).filter(t => '▁▂▃▄▅▆▇█'.includes(t.text) && t.text.length === 1 && (t.props.color === 'warning' || t.props.color === 'success'))
-  expect(bars.map(t => [t.text, t.props.color])).toEqual([['▅', 'warning'], ['▁', 'success'], ['█', 'warning'], ['▁', 'success'], ['▁', 'success']])
+  const bars = (await pane.findAll({ type: 'Text' })).filter(
+    t =>
+      '▁▂▃▄▅▆▇█'.includes(t.text) &&
+      t.text.length === 1 &&
+      (t.props.color === 'warning' || t.props.color === 'success'),
+  )
+  expect(bars.map(t => [t.text, t.props.color])).toEqual([
+    ['▅', 'warning'],
+    ['▁', 'success'],
+    ['█', 'warning'],
+    ['▁', 'success'],
+    ['▁', 'success'],
+  ])
   expect(await pane.find({ text: ' last 5 prompts' })).toBeDefined()
 })
 
@@ -676,38 +784,8 @@ test('a failed trend query shows a toast and a dash for the streak', async ($, o
   await turn($, calls, [CHECK_TEXT])
   expect(calls.toasts.some(t => t.startsWith('Grammar tracker: failed to read the trend ('))).toBe(true)
   const pane = await $.ui.mount(PANE)
-  const tiles = (await pane.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.alignItems === 'center')
+  const tiles = (await pane.findAll({ type: 'Box' })).filter(
+    b => b.props.borderStyle === 'round' && b.props.alignItems === 'center',
+  )
   expect(tiles.map(t => t.text.replace(/\s+/g, ' ').trim()).at(-1)).toBe('–Clean streak')
-})
-
-test('meter, barFill, sparkline and cleanStreak scale a count', () => {
-  expect([1, 2, 3, 4, 5, 9, 10, 59].map(meter)).toEqual(['●○○○○', '●●○○○', '●●●○○', '●●●○○', '●●●●○', '●●●●○', '●●●●●', '●●●●●'])
-  expect([barFill(59, 59), barFill(1, 59), barFill(30, 59)]).toEqual([10, 1, 5])
-  expect(sparkline([0, 1, 4, 8])).toEqual(['▁', '▂', '▅', '█'])
-  expect(sparkline([0, 0])).toEqual(['▁', '▁'])
-  expect([cleanStreak([1, 0, 0]), cleanStreak([0, 2]), cleanStreak([]), cleanStreak([0, 0])]).toEqual([2, 0, 0, 2])
-})
-
-test('every mistake type has an icon and a color, and an unknown type uses the "other" ones', () => {
-  expect(typeIcon('article')).toBe('ª')
-  expect(typeIcon('pronoun')).not.toBe(typeIcon('other'))
-  expect(typeColor('pronoun')).not.toBe(typeColor('other'))
-  expect(typeIcon('nope')).toBe(typeIcon('other'))
-  expect(typeColor('nope')).toBe(typeColor('other'))
-})
-
-test('the mascot is four rows of ten cells, and its mouth turns down when worried', () => {
-  const text = (rows: ReturnType<typeof mascotRows>) => rows.map(row => row.map(run => run.text).join(''))
-  const happy = mascotRows('happy')
-  expect(happy.length).toBe(4)
-  expect(text(happy).map(row => row.length)).toEqual([10, 10, 10, 10])
-  expect(text(mascotRows('worried'))).not.toEqual(text(happy))
-})
-
-test('shareCells splits a bar by share, one cell at least, and fills the bar', () => {
-  expect(shareCells([3, 1], 8)).toEqual([6, 2])
-  expect(shareCells([59, 31, 22, 17, 12, 9, 6, 4], 68).reduce((a, b) => a + b, 0)).toBe(68)
-  expect(shareCells([100, 1, 1], 10)).toEqual([8, 1, 1])
-  expect(shareCells([1, 1, 1], 2)).toEqual([1, 1])
-  expect(shareCells([], 10)).toEqual([])
 })

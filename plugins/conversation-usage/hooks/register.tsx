@@ -3,7 +3,14 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Grouping, Tab, View, WindowTotal } from '../types'
 import {
-  loadConversation, loadHistory, loadPriceBook, loadWindows, loadWindowTotal, openDb, saveConversation, saveDownloadedPrices,
+  loadConversation,
+  loadHistory,
+  loadPriceBook,
+  loadWindows,
+  loadWindowTotal,
+  openDb,
+  saveConversation,
+  saveDownloadedPrices,
   saveWindow,
 } from './db'
 import type { Db } from './db'
@@ -11,7 +18,7 @@ import { drawPane } from './draw'
 import type { Actions } from './draw'
 import { fmtCost, fmtTokens } from './format'
 import { sumUsage } from './model'
-import { BUILT_IN_BOOK, PRICING_URL, usePriceBook } from './prices'
+import { BUILT_IN_BOOK, PRICING_URL, totalTokens, usePriceBook } from './prices'
 import { parsePricingPage } from './pricing-page'
 import { newReader, readConversation } from './sync'
 import { currentWindows, observe } from './windows'
@@ -39,10 +46,13 @@ const priceAttemptAt = atom({ plugin: 'conversation-usage', key: 'priceAttemptAt
 const CHECK_EVERY_MS = 24 * 3_600_000
 const RETRY_MS = 3_600_000
 
-const after = <T,>(list: T[], item: T): T => list[(list.indexOf(item) + 1) % list.length]!
+const after = <T,>(list: T[], item: T): T => list[(list.indexOf(item) + 1) % list.length] ?? item
 
 // One line for the notice: the first line of the error.
-const oneLine = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split('\n')[0]!
+const oneLine = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.split('\n')[0] ?? message
+}
 
 // The transcript reader, and the database once it has opened. A failed open is retried on the next call.
 const reader = newReader()
@@ -70,7 +80,7 @@ async function loadDetailsAtom($: EngineInterface, id: string): Promise<void> {
   if ('error' in db) return
   try {
     const found = await loadConversation($, db, id)
-    if (found !== null) await update($, details, (m) => ({ ...m, [id]: found }))
+    if (found !== null) await update($, details, m => ({ ...m, [id]: found }))
   } catch (error) {
     await update($, notice, () => oneLine(error))
   }
@@ -96,13 +106,15 @@ async function downloadPrices($: EngineInterface, db: Db, t: number): Promise<vo
   let error: string | null = null
   try {
     const response = await $.http.fetch(PRICING_URL)
-    const parsed = response.ok ? parsePricingPage(response.text, t) : { error: `The pricing page answered ${response.status}` }
+    const parsed = response.ok
+      ? parsePricingPage(response.text, t)
+      : { error: `The pricing page answered ${response.status}` }
     if ('error' in parsed) error = parsed.error
     else await saveDownloadedPrices($, db, parsed, t)
   } catch (e) {
     error = oneLine(e)
   }
-  await update($, prices, (b) => ({ ...b, error }))
+  await update($, prices, b => ({ ...b, error }))
   await loadPrices($, db)
 }
 
@@ -115,7 +127,7 @@ async function refresh($: EngineInterface): Promise<void> {
     await update($, current, () => conversation)
     // An expanded History conversation that is the current one shows the fresh read.
     if (conversation !== null) {
-      await update($, details, (m) => (conversation.id in m ? { ...m, [conversation.id]: conversation } : m))
+      await update($, details, m => (conversation.id in m ? { ...m, [conversation.id]: conversation } : m))
     }
     await update($, now, () => t)
     const db = await database($)
@@ -197,19 +209,19 @@ async function showTab($: EngineInterface, t: Tab): Promise<void> {
 
 function actionsFor($: EngineInterface): Actions {
   return {
-    toggle: (key, open) => void update($, expanded, (m) => ({ ...m, [key]: !open })),
-    nextView: () => void update($, view, (v) => after(VIEWS, v)),
-    nextTab: () => void read($, tab).then((t) => showTab($, after(TABS, t))),
-    nextGrouping: () => void update($, grouping, (g) => after(GROUPINGS, g)),
-    selectTab: (t) => void showTab($, t),
-    selectView: (v) => void update($, view, () => v),
-    selectGrouping: (g) => void update($, grouping, () => g),
+    toggle: (key, open) => void update($, expanded, m => ({ ...m, [key]: !open })),
+    nextView: () => void update($, view, v => after(VIEWS, v)),
+    nextTab: () => void read($, tab).then(t => showTab($, after(TABS, t))),
+    nextGrouping: () => void update($, grouping, g => after(GROUPINGS, g)),
+    selectTab: t => void showTab($, t),
+    selectView: v => void update($, view, () => v),
+    selectGrouping: g => void update($, grouping, () => g),
     hide: () => void closePane($),
-    loadDetails: (id) => void loadDetailsAtom($, id),
+    loadDetails: id => void loadDetailsAtom($, id),
   }
 }
 
-export const register: Register = (on) => {
+export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
     await $.command.register({ name: 'conversation-usage', description: 'Open or close the usage pane' })
@@ -230,7 +242,7 @@ export const register: Register = (on) => {
     return result
   })
 
-  on('command.run', { command: 'conversation-usage' }, async ($) => {
+  on('command.run', { command: 'conversation-usage' }, async $ => {
     await togglePane($)
     return { text: '' }
   })
@@ -247,14 +259,16 @@ export const register: Register = (on) => {
     const shown = await read($, isOpen)
     const requests = conversation?.requests ?? []
     const usage = sumUsage(requests)
-    const total = Object.values(usage.tokens).reduce((a, b) => a + b, 0)
+    const total = totalTokens(usage.tokens)
     const line =
-      requests.length === 0 ? 'Usage · no requests yet' : `Usage · ${fmtTokens(total)} tokens · ${fmtCost(usage.cost?.total ?? null)}`
+      requests.length === 0
+        ? 'Usage · no requests yet'
+        : `Usage · ${fmtTokens(total)} tokens · ${fmtCost(usage.cost?.total ?? null)}`
     return (
       <Box flexDirection="column">
         {await next(e)}
         <Box>
-          <Text dimColor>{line}   </Text>
+          <Text dimColor>{line} </Text>
           <Button key="conversation-usage-toggle" hotkey="u" plain onPress={() => togglePane($)}>
             {shown ? 'Hide' : 'Show'}
           </Button>

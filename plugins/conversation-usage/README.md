@@ -122,7 +122,7 @@ From the repository root:
 claude --plugin-dir plugins/conversation-usage
 claude plugin validate plugins/conversation-usage
 claude plugin test plugins/conversation-usage
-npx -y -p typescript tsc -p plugins/conversation-usage
+npm run typecheck
 npx -y tsx plugins/conversation-usage/tests/sql-check.ts
 ```
 

@@ -6,7 +6,11 @@ export const WINDOW_MS: Record<WindowKind, number> = {
 }
 
 // The engine's SessionRateLimit: percentUsed runs 0 to 100.
-export type Reading = { kind: string; percentUsed: number; resetsAt?: string }
+export interface Reading {
+  kind: string
+  percentUsed: number
+  resetsAt?: string
+}
 
 const KINDS: WindowKind[] = ['five_hour', 'seven_day']
 
@@ -21,7 +25,7 @@ export function observe(stored: Window[], reading: Reading, now: number): Window
   if (Number.isNaN(end) || end <= now) return []
   const kind = reading.kind
   const percentUsed = reading.percentUsed
-  const ofKind = stored.filter((w) => w.kind === kind)
+  const ofKind = stored.filter(w => w.kind === kind)
 
   let live: Window | undefined
   for (const w of ofKind) if (w.end > now && (!live || w.start > live.start)) live = w
@@ -32,7 +36,10 @@ export function observe(stored: Window[], reading: Reading, now: number): Window
   }
   if (live.end === end) return live.percentUsed === percentUsed ? [] : [{ ...live, percentUsed }]
   if (percentUsed <= 1 && percentUsed < live.percentUsed) {
-    return [{ ...live, end: now }, { kind, start: now, end, percentUsed }]
+    return [
+      { ...live, end: now },
+      { kind, start: now, end, percentUsed },
+    ]
   }
   return [{ ...live, end, percentUsed }]
 }
@@ -41,7 +48,7 @@ export function observe(stored: Window[], reading: Reading, now: number): Window
 export function currentWindows(stored: Window[], now: number): Window[] {
   const out: Window[] = []
   for (const kind of KINDS) {
-    const hit = stored.find((w) => w.kind === kind && w.start <= now && now < w.end)
+    const hit = stored.find(w => w.kind === kind && w.start <= now && now < w.end)
     if (hit) out.push(hit)
   }
   return out

@@ -1,0 +1,21 @@
+{
+  "name": "qol-dev",
+  "private": true,
+  "description": "Development tools only. The mods load no package from this file.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "node scripts/typecheck.js",
+    "lint": "eslint plugins",
+    "format": "prettier --write plugins",
+    "format:check": "prettier --check plugins",
+    "check": "npm run typecheck && npm run lint && npm run format:check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
+    "eslint": "^10.14.0",
+    "prettier": "^3.10.1",
+    "typescript": "~6.0",
+    "typescript-eslint": "^8.72.2"
+  }
+}

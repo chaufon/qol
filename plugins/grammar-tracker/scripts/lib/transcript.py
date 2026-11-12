@@ -2,6 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from lib.config import CLAUDE_DIR
 
@@ -37,7 +38,7 @@ class Check:
     mistakes: list[Mistake]
 
 
-def _prompt_text(entry):
+def _prompt_text(entry: dict[str, Any]) -> str | None:
     """Return the text of a user-written prompt entry, or None for any other entry."""
     if entry.get("type") != "user" or entry.get("isMeta") or entry.get("isSidechain"):
         return None
@@ -51,14 +52,14 @@ def _prompt_text(entry):
     return content
 
 
-def find_transcript(session_id, projects_dir=CLAUDE_DIR / "projects"):
+def find_transcript(session_id: str, projects_dir: str | Path = CLAUDE_DIR / "projects") -> Path | None:
     """Return the transcript file of a session, which is named after the session id."""
     return next(Path(projects_dir).glob(f"*/{session_id}.jsonl"), None)
 
 
-def user_prompts(path):
+def user_prompts(path: str | Path) -> list[Prompt]:
     """Return the user-written prompts of the transcript in file order."""
-    prompts = []
+    prompts: list[Prompt] = []
     for line in Path(path).read_text().splitlines():
         entry = json.loads(line)
         text = _prompt_text(entry)
@@ -67,12 +68,12 @@ def user_prompts(path):
     return prompts
 
 
-def does_not_apply(reply):
+def does_not_apply(reply: str) -> bool:
     """Return True when the reply says the check does not apply, with or without the label."""
     return reply.lstrip().removeprefix(CHECK_LABEL).lstrip().startswith(NOT_APPLY)
 
 
-def extract_check(reply):
+def extract_check(reply: str) -> Check | None:
     """Parse the grammar-json block of a reply. Return None when the reply has no block."""
     match = BLOCK_RE.search(reply)
     if not match:
@@ -90,7 +91,10 @@ def extract_check(reply):
             for m in data["mistakes"]
         ]
         mode = data.get("input_mode")
-        return Check(input_mode=mode if mode in INPUT_MODES else None,
-                     corrected_prompt=data["corrected_prompt"], mistakes=mistakes)
+        return Check(
+            input_mode=mode if mode in INPUT_MODES else None,
+            corrected_prompt=data["corrected_prompt"],
+            mistakes=mistakes,
+        )
     except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
         raise ValueError(f"malformed grammar-json block: {error!r}") from error

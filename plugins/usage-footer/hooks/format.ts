@@ -24,7 +24,13 @@ export const bar = (percent: number, cells = BAR_CELLS): { filled: string; empty
 export type Tone = 'success' | 'warning' | 'error'
 
 // `hint` is the text a pointer over the segment reveals.
-export type Segment = { text: string; tone?: Tone; isBold?: boolean; isDim?: boolean; hint?: string }
+export interface Segment {
+  text: string
+  tone?: Tone
+  isBold?: boolean
+  isDim?: boolean
+  hint?: string
+}
 
 export const tokens = (n: number): string =>
   n >= 1_000_000
@@ -62,7 +68,11 @@ export const segments = (s: Snapshot, now: number): Segment[] => {
   if (s.contextTokens === null) {
     out.push({ text: '–', isDim: true })
   } else {
-    const size: Segment = { text: `${s.isEstimate ? '~' : ''}${tokens(s.contextTokens)}`, tone: contextTone(s.contextTokens), isBold: true }
+    const size: Segment = {
+      text: `${s.isEstimate ? '~' : ''}${tokens(s.contextTokens)}`,
+      tone: contextTone(s.contextTokens),
+      isBold: true,
+    }
     const hint = contextHint(s)
 
     out.push(hint === null ? size : { ...size, hint })
@@ -115,7 +125,10 @@ export const sevenDay = (s: Snapshot, now: number): { parts: Segment[]; card: st
   const at = new Date(s.sevenDayResetsAt)
   const day = WEEKDAYS[at.getDay()] ?? ''
 
-  return { parts, card: `Resets ${day} ${pad(at.getHours())}:${pad(at.getMinutes())} (${countdown(at.getTime() - now)})` }
+  return {
+    parts,
+    card: `Resets ${day} ${pad(at.getHours())}:${pad(at.getMinutes())} (${countdown(at.getTime() - now)})`,
+  }
 }
 
 export const plain = (parts: Segment[]): string => parts.map(p => p.text).join('')

@@ -3,7 +3,10 @@
 // or `src/app.ts#L42`. In plain text the path needs an extension; inside a code span any path counts. A path may start
 // with a Windows drive (`C:\proj\app.ts`), and `\` separates its parts as `/` does.
 
-export type Reference = { path: string; line: number | null }
+export interface Reference {
+  path: string
+  line: number | null
+}
 
 // The most lines the pane draws above the referenced line, and the most characters it draws in all.
 const LINES_ABOVE = 300
@@ -68,11 +71,17 @@ export function fromHref(href: string): Reference | null {
   if (!href.startsWith('file://')) return null
   const url = new URL(href)
   const line = /^#L(\d+)$/.exec(url.hash)
-  return { path: decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:\/)/, '$1'), line: line ? Number(line[1]) : null }
+  return {
+    path: decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:\/)/, '$1'),
+    line: line ? Number(line[1]) : null,
+  }
 }
 
 // Rewrites each reference whose path `resolve` maps to an absolute path as a link, and returns the links' targets.
-export function linkify(text: string, resolve: (path: string) => string | undefined): { text: string; hrefs: string[] } {
+export function linkify(
+  text: string,
+  resolve: (path: string) => string | undefined,
+): { text: string; hrefs: string[] } {
   const hrefs = new Set<string>()
   const link = (label: string, { path, line }: Reference) => {
     const absolute = resolve(path)

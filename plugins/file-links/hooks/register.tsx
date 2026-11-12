@@ -13,7 +13,11 @@ const shown = atom({ plugin: 'file-links', key: 'shown' } as const, null as Show
 const indexVersion = atom({ plugin: 'file-links', key: 'indexVersion' } as const, 0)
 
 // The project's files by path relative to the working directory, and by file name, from `git ls-files`.
-type FileIndex = { cwd: string; files: Set<string>; byName: Map<string, string[]> }
+interface FileIndex {
+  cwd: string
+  files: Set<string>
+  byName: Map<string, string[]>
+}
 
 let index: FileIndex | undefined
 // What each written path resolved to (an absolute path, or null for no file), kept until the index is rebuilt.
@@ -47,8 +51,10 @@ async function buildIndex($: EngineInterface) {
   const files = new Set<string>()
   const byName = new Map<string, string[]>()
   try {
-    const ran = await $.process.run(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-                                    { cwd, timeoutMs: 10_000 })
+    const ran = await $.process.run(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
+      cwd,
+      timeoutMs: 10_000,
+    })
     if (ran.exitCode === 0) {
       for (const file of ran.stdout.split('\0')) {
         if (!file) continue
@@ -62,7 +68,7 @@ async function buildIndex($: EngineInterface) {
   }
   // With the same file list, replies already drawn keep their links: only the paths that named no file are looked up
   // again, by the next reply that writes them.
-  if (index !== undefined && index.cwd === cwd && sameFiles(index.files, files)) {
+  if (index?.cwd === cwd && sameFiles(index.files, files)) {
     for (const [path, found] of resolved) if (found === null) resolved.delete(path)
     return
   }
@@ -81,10 +87,13 @@ async function isFile($: EngineInterface, path: string): Promise<string | null> 
 async function resolvePath($: EngineInterface, written: string): Promise<string | null> {
   const known = resolved.get(written)
   if (known !== undefined) return known
-  const { cwd, files, byName }: FileIndex =
-    index ?? { cwd: slashes(await $.session.cwd()), files: new Set(), byName: new Map() }
+  const { cwd, files, byName }: FileIndex = index ?? {
+    cwd: slashes(await $.session.cwd()),
+    files: new Set(),
+    byName: new Map(),
+  }
   let path = slashes(written).replace(/^\.\//, '')
-  let found: string | null = null
+  let found: string | null
   if (path.startsWith('~/')) {
     const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
     path = home === undefined ? path : join(slashes(home), path.slice(2))
@@ -107,8 +116,9 @@ const reported = new Set<string>()
 function reportDrawnBy($: EngineInterface, plugin: string) {
   if (reported.has(plugin)) return
   reported.add(plugin)
-  $.ui.toast(`file-links: ${plugin} draws Claude's replies itself, so file references in them are not links`,
-             { timeoutMs: 10_000 })
+  $.ui.toast(`file-links: ${plugin} draws Claude's replies itself, so file references in them are not links`, {
+    timeoutMs: 10_000,
+  })
 }
 
 function labelOf(cwd: string, path: string): string {
@@ -208,8 +218,10 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" width={e.props.bodyColumns}>
         <Text dimColor>{'─'.repeat(e.props.bodyColumns)}</Text>
-        <Text bold>{header}</Text>
-        <Text dimColor>{`${lines.length} lines${last < lines.length || first > 1 ? `, showing ${first}-${last}` : ''}`}</Text>
+        <Text weight="semibold">{header}</Text>
+        <Text
+          dimColor
+        >{`${lines.length} lines${last < lines.length || first > 1 ? `, showing ${first}-${last}` : ''}`}</Text>
         {target === null ? (
           code(first, last)
         ) : (

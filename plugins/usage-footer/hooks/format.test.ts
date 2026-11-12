@@ -1,6 +1,17 @@
 import { expect, test } from 'claude-code/testing'
 
-import { bar, contextHint, contextTone, countdown, plain, resetTone, segments, sevenDay, tokens, windowTone } from './format'
+import {
+  bar,
+  contextHint,
+  contextTone,
+  countdown,
+  plain,
+  resetTone,
+  segments,
+  sevenDay,
+  tokens,
+  windowTone,
+} from './format'
 
 const at = (h: number, m: number) => new Date(2026, 9, 19, h, m)
 
@@ -66,7 +77,10 @@ test('the size shows alone, its share of the window is its hint', () => {
 })
 
 test('an estimated size starts with ~', () => {
-  const parts = segments({ ...EMPTY, contextTokens: 21_000, isEstimate: true, contextPercent: 11, contextWindow: 200_000 }, 0)
+  const parts = segments(
+    { ...EMPTY, contextTokens: 21_000, isEstimate: true, contextPercent: 11, contextWindow: 200_000 },
+    0,
+  )
 
   expect(plain(parts)).toBe('📚 ~21k')
 })
@@ -78,7 +92,6 @@ test('the hint needs the percentage and the window', () => {
   expect(contextHint({ ...base, contextPercent: null })).toBeNull()
   expect(contextHint({ ...base, contextWindow: null })).toBeNull()
 })
-
 
 test('no reading yet', () => {
   expect(plain(segments(EMPTY, 0))).toBe('📚 –')

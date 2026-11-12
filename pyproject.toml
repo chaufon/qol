@@ -1,0 +1,31 @@
+# Development tools only. The mods' Python scripts use the standard library and nothing from this file.
+[project]
+name = "qol-dev"
+version = "0"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest", "ruff", "mypy"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["plugins/grammar-tracker/tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+include = ["plugins/*/scripts/**/*.py", "plugins/*/tests/**/*.py"]
+
+[tool.ruff.lint]
+ignore = ["E501"]  # ruff format sets the line length; it leaves long string literals alone
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PTH", "N"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["plugins/grammar-tracker/scripts"]
+mypy_path = "plugins/grammar-tracker/scripts"
+explicit_package_bases = true
+strict = true

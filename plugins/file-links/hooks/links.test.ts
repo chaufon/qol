@@ -5,7 +5,7 @@ import { fromHref, lineWindow, linkify, references, toHref } from './links'
 const FILES: Record<string, string> = {
   'src/app.ts': '/repo/src/app.ts',
   'app.ts': '/repo/src/app.ts',
-  'Makefile': '/repo/Makefile',
+  Makefile: '/repo/Makefile',
   'hooks/register.tsx': '/repo/hooks/register.tsx',
 }
 const resolve = (path: string) => FILES[path]
@@ -34,7 +34,9 @@ test('a sentence-ending period is not part of the path', () => {
 
 test('links only the paths that resolve', () => {
   const { text, hrefs } = linkify('Open `src/app.ts:42` or missing.ts:3, then app.ts.', resolve)
-  expect(text).toBe('Open [`src/app.ts:42`](file:///repo/src/app.ts#L42) or missing.ts:3, then [app.ts](file:///repo/src/app.ts).')
+  expect(text).toBe(
+    'Open [`src/app.ts:42`](file:///repo/src/app.ts#L42) or missing.ts:3, then [app.ts](file:///repo/src/app.ts).',
+  )
   expect(hrefs).toEqual(['file:///repo/src/app.ts#L42', 'file:///repo/src/app.ts'])
 })
 

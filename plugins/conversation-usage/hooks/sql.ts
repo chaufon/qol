@@ -1,5 +1,15 @@
 import type {
-  Conversation, HistoryConversation, HistorySlice, PriceRow, Prompt, Rates, Request, Subagent, Usage, Window, WindowKind,
+  Conversation,
+  HistoryConversation,
+  HistorySlice,
+  PriceRow,
+  Prompt,
+  Rates,
+  Request,
+  Subagent,
+  Usage,
+  Window,
+  WindowKind,
 } from '../types'
 
 type Row = Record<string, unknown>
@@ -44,12 +54,15 @@ const tuple = (values: (string | number | null)[]) => `(${values.map(quote).join
 // One INSERT per chunk of rows; every column outside the key is overwritten on conflict.
 function upsert(table: string, columns: string[], key: string[], rows: (string | number | null)[][]): string {
   const set = columns
-    .filter((c) => !key.includes(c))
-    .map((c) => `${c} = excluded.${c}`)
+    .filter(c => !key.includes(c))
+    .map(c => `${c} = excluded.${c}`)
     .join(', ')
   const statements: string[] = []
   for (let i = 0; i < rows.length; i += CHUNK) {
-    const values = rows.slice(i, i + CHUNK).map(tuple).join(',\n')
+    const values = rows
+      .slice(i, i + CHUNK)
+      .map(tuple)
+      .join(',\n')
     statements.push(
       `INSERT INTO ${table} (${columns.join(', ')}) VALUES\n${values}\nON CONFLICT (${key.join(', ')}) DO UPDATE SET ${set};`,
     )
@@ -63,23 +76,59 @@ export const upsertConversation = (c: Conversation): string =>
 // The cost columns are left to `repriceRequests`.
 export function upsertRequests(conversationId: string, rs: Request[]): string {
   const columns = [
-    'message_id', 'request_id', 'conversation_id', 'agent_id', 'at', 'model', 'is_fast',
-    'input', 'cache_write_5m', 'cache_write_1h', 'cache_read', 'output', 'tools', 'tool_use_ids',
+    'message_id',
+    'request_id',
+    'conversation_id',
+    'agent_id',
+    'at',
+    'model',
+    'is_fast',
+    'input',
+    'cache_write_5m',
+    'cache_write_1h',
+    'cache_read',
+    'output',
+    'tools',
+    'tool_use_ids',
   ]
-  const rows = rs.map((r) => {
+  const rows = rs.map(r => {
     const t = r.tokens
     return [
-      r.messageId, r.requestId, conversationId, r.agentId, r.at, r.model, r.isFast ? 1 : 0,
-      t.input, t.cacheWrite5m, t.cacheWrite1h, t.cacheRead, t.output,
-      JSON.stringify(r.tools), JSON.stringify(r.toolUseIds),
+      r.messageId,
+      r.requestId,
+      conversationId,
+      r.agentId,
+      r.at,
+      r.model,
+      r.isFast ? 1 : 0,
+      t.input,
+      t.cacheWrite5m,
+      t.cacheWrite1h,
+      t.cacheRead,
+      t.output,
+      JSON.stringify(r.tools),
+      JSON.stringify(r.toolUseIds),
     ]
   })
   return upsert('requests', columns, ['message_id', 'request_id'], rows)
 }
 
 const PRICE_COLUMNS = [
-  'since', 'ord', 'model', 'input', 'cache_write_5m', 'cache_write_1h', 'cache_read', 'output', 'fast_factor', 'long_above',
-  'long_input', 'long_cache_write_5m', 'long_cache_write_1h', 'long_cache_read', 'long_output',
+  'since',
+  'ord',
+  'model',
+  'input',
+  'cache_write_5m',
+  'cache_write_1h',
+  'cache_read',
+  'output',
+  'fast_factor',
+  'long_above',
+  'long_input',
+  'long_cache_write_5m',
+  'long_cache_write_1h',
+  'long_cache_read',
+  'long_output',
 ]
 
 // Stores one price list in place of any list with the same `since`.
@@ -87,8 +136,20 @@ export function replacePriceList(since: number, source: string, checkedAt: numbe
   const values = rows.map((r, i) => {
     const l = r.longRates
     return [
-      since, i, r.model, r.rates.input, r.rates.cacheWrite5m, r.rates.cacheWrite1h, r.rates.cacheRead, r.rates.output,
-      r.fastFactor, r.longAbove, l?.input ?? null, l?.cacheWrite5m ?? null, l?.cacheWrite1h ?? null, l?.cacheRead ?? null,
+      since,
+      i,
+      r.model,
+      r.rates.input,
+      r.rates.cacheWrite5m,
+      r.rates.cacheWrite1h,
+      r.rates.cacheRead,
+      r.rates.output,
+      r.fastFactor,
+      r.longAbove,
+      l?.input ?? null,
+      l?.cacheWrite5m ?? null,
+      l?.cacheWrite1h ?? null,
+      l?.cacheRead ?? null,
       l?.output ?? null,
     ]
   })
@@ -96,7 +157,9 @@ export function replacePriceList(since: number, source: string, checkedAt: numbe
     `DELETE FROM prices WHERE since = ${quote(since)};`,
     upsert('price_lists', ['since', 'source', 'checked_at'], ['since'], [[since, source, checkedAt]]),
     upsert('prices', PRICE_COLUMNS, ['since', 'model'], values),
-  ].filter((s) => s !== '').join('\n')
+  ]
+    .filter(s => s !== '')
+    .join('\n')
 }
 
 export const touchPriceList = (since: number, checkedAt: number): string =>
@@ -110,8 +173,11 @@ export const selectPriceLists = (): string => `SELECT since, source, checked_at 
 // each with or without a trailing `[...]` tag.
 const MATCHES_MODEL = (() => {
   const date = '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-  const forms = ['', `-${date}`, `@${date}`].flatMap((d) => [d, `${d}[[]*]`])
-  return `(r.model = p.model OR ${forms.slice(1).map((f) => `r.model GLOB p.model || '${f}'`).join(' OR ')})`
+  const forms = ['', `-${date}`, `@${date}`].flatMap(d => [d, `${d}[[]*]`])
+  return `(r.model = p.model OR ${forms
+    .slice(1)
+    .map(f => `r.model GLOB p.model || '${f}'`)
+    .join(' OR ')})`
 })()
 
 // Sets the cost columns of the stored requests (of one conversation, or all when null) from the prices table,
@@ -146,14 +212,24 @@ export const upsertSubagents = (conversationId: string, ss: Subagent[]): string 
     'subagents',
     ['agent_id', 'conversation_id', 'parent_agent_id', 'name', 'tool_use_id'],
     ['agent_id'],
-    ss.map((s) => [s.agentId, conversationId, s.parentAgentId, s.name, s.toolUseId]),
+    ss.map(s => [s.agentId, conversationId, s.parentAgentId, s.name, s.toolUseId]),
   )
 
 export const upsertPrompts = (conversationId: string, ps: Prompt[]): string =>
-  upsert('prompts', ['conversation_id', 'at', 'text'], ['conversation_id', 'at'], ps.map((p) => [conversationId, p.at, p.text]))
+  upsert(
+    'prompts',
+    ['conversation_id', 'at', 'text'],
+    ['conversation_id', 'at'],
+    ps.map(p => [conversationId, p.at, p.text]),
+  )
 
 export const upsertWindow = (w: Window): string =>
-  upsert('windows', ['kind', 'start', '"end"', 'percent_used'], ['kind', 'start'], [[w.kind, w.start, w.end, w.percentUsed]])
+  upsert(
+    'windows',
+    ['kind', 'start', '"end"', 'percent_used'],
+    ['kind', 'start'],
+    [[w.kind, w.start, w.end, w.percentUsed]],
+  )
 
 // Column list that sums the usage of the joined `requests` rows (alias r).
 const USAGE = `COALESCE(SUM(r.input), 0) AS input,
@@ -195,8 +271,11 @@ export const selectSubagents = (id: string): string =>
 export const selectPrompts = (id: string): string =>
   `SELECT at, text FROM prompts WHERE conversation_id = ${quote(id)} ORDER BY at;`
 
-const str = (v: unknown): string => String(v ?? '')
-const strOrNull = (v: unknown): string | null => (v === null || v === undefined ? null : String(v))
+// sqlite3 -json gives each cell as a string, a number or null.
+const text = (v: unknown): string | null =>
+  typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : null
+const str = (v: unknown): string => text(v) ?? ''
+const strOrNull = (v: unknown): string | null => text(v)
 const num = (v: unknown): number => Number(v ?? 0)
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v))
 const list = (v: unknown): string[] => {
@@ -257,7 +336,9 @@ export const toPriceRow = (row: Row): PriceRow => ({
 })
 
 export const toPriceList = (row: Row): { since: number; source: string; checkedAt: number } => ({
-  since: num(row.since), source: str(row.source), checkedAt: num(row.checked_at),
+  since: num(row.since),
+  source: str(row.source),
+  checkedAt: num(row.checked_at),
 })
 
 export const toPrompt = (row: Row): Prompt => ({ at: num(row.at), text: str(row.text) })

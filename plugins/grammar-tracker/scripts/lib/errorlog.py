@@ -1,4 +1,5 @@
 """The error log in the data folder, where the scripts write their failures instead of blocking Claude Code."""
+
 from datetime import datetime
 
 from lib import config

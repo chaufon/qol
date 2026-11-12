@@ -3,16 +3,19 @@ import subprocess
 import sys
 
 import pytest
-
 from conftest import ROOT, block, script_env, user
 from lib import config
 from lib.db import connect
 
 
 def run(script, payload, home, **env):
-    result = subprocess.run([sys.executable, str(ROOT / "scripts" / script)], input=json.dumps(payload),
-                            capture_output=True, text=True,
-                            env=script_env(home, CLAUDE_PLUGIN_DATA=str(home), **env))
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / script)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env=script_env(home, CLAUDE_PLUGIN_DATA=str(home), **env),
+    )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout) if result.stdout.strip() else None
 
@@ -26,11 +29,29 @@ def test_prompt_context_adds_instruction(tmp_path):
     assert '"reason": "<why it is a mistake, in a few words>"' in context
     assert '- word_choice: the correct word ("key" for "press the G button")' in context
     assert "- false_friend: the false friend used, never the correct word" in context
-    positions = [context.index(f"- {key}:") for key in ("spelling", "irregular_verb", "phrasal_verb", "wrong_tense",
-                                                         "malformed_tense", "word_order", "native_expression",
-                                                         "preposition", "article", "agreement", "word_choice",
-                                                         "false_friend", "countability", "missing_subject",
-                                                         "verb_pattern", "question_form", "pronoun", "other")]
+    positions = [
+        context.index(f"- {key}:")
+        for key in (
+            "spelling",
+            "irregular_verb",
+            "phrasal_verb",
+            "wrong_tense",
+            "malformed_tense",
+            "word_order",
+            "native_expression",
+            "preposition",
+            "article",
+            "agreement",
+            "word_choice",
+            "false_friend",
+            "countability",
+            "missing_subject",
+            "verb_pattern",
+            "question_form",
+            "pronoun",
+            "other",
+        )
+    ]
     assert positions == sorted(positions)
 
 
@@ -78,7 +99,6 @@ def test_native_language_option_lists_the_languages_prompt_context_knows():
     assert option["default"] == config.DEFAULT_NATIVE_LANGUAGE
 
 
-
 def test_prompt_context_leaves_out_deleted_type(tmp_path):
     conn = connect(tmp_path / "grammar.db")
     conn.execute("UPDATE mistake_types SET deleted_at = '2026-01-01T00:00:00' WHERE key = 'phrasal_verb'")
@@ -101,34 +121,57 @@ def test_prompt_context_honors_skip_phrase(tmp_path):
 
 
 def test_script_without_claude_plugin_data_uses_the_data_folder_claude_code_gives_the_plugin(tmp_path):
-    result = subprocess.run([sys.executable, str(ROOT / "scripts" / "query.py"), "top"], capture_output=True, text=True,
-                            env=script_env(tmp_path, CLAUDE_CONFIG_DIR=str(tmp_path)), cwd=tmp_path)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "query.py"), "top"],
+        capture_output=True,
+        text=True,
+        env=script_env(tmp_path, CLAUDE_CONFIG_DIR=str(tmp_path)),
+        cwd=tmp_path,
+    )
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "plugins" / "data" / "grammar-tracker-qol" / "grammar.db").exists()
 
 
 def save_payload(reply, turn_id="turn-1", prompt="the people"):
-    return {"turn_id": turn_id, "session_id": "s1", "cwd": "/proj", "prompt": prompt, "reply": reply,
-            "timestamp": "2026-10-17T12:00:00.000Z"}
+    return {
+        "turn_id": turn_id,
+        "session_id": "s1",
+        "cwd": "/proj",
+        "prompt": prompt,
+        "reply": reply,
+        "timestamp": "2026-10-17T12:00:00.000Z",
+    }
 
 
 def test_save_check_saves_and_reports(tmp_path):
-    mistake = {"type": "article", "identifier": "no article", "original": "the people", "corrected": "people",
-               "reason": "people in general take no article"}
+    mistake = {
+        "type": "article",
+        "identifier": "no article",
+        "original": "the people",
+        "corrected": "people",
+        "reason": "people in general take no article",
+    }
     payload = {"input_mode": "typed", "corrected_prompt": "people", "mistakes": [mistake] * 3}
     out = run("save_check.py", save_payload(block(payload)), tmp_path)
     assert "systemMessage" not in out
-    assert out["occurrences"][0] == {"type": "article", "type_label": "article", "identifier": "no article",
-                                     "type_description": 'A wrong, missing or extra "a/an" or "the".',
-                                     "type_example": '"the people are selfish" instead of "people are selfish"',
-                                     "original": "the people", "corrected": "people",
-                                     "reason": "people in general take no article", "count": 3,
-                                     "is_recurring": True}
+    assert out["occurrences"][0] == {
+        "type": "article",
+        "type_label": "article",
+        "identifier": "no article",
+        "type_description": 'A wrong, missing or extra "a/an" or "the".',
+        "type_example": '"the people are selfish" instead of "people are selfish"',
+        "original": "the people",
+        "corrected": "people",
+        "reason": "people in general take no article",
+        "count": 3,
+        "is_recurring": True,
+    }
     assert len(out["occurrences"]) == 3
     assert out["corrected_prompt"] == "people"
     conn = connect(tmp_path / "grammar.db")
     assert conn.execute("SELECT turn_id, prompt_uuid, original, created_at, project_dir FROM prompts").fetchall() == [
-        ("turn-1", None, "the people", "2026-10-17T12:00:00.000Z", "/proj")]
+        ("turn-1", None, "the people", "2026-10-17T12:00:00.000Z", "/proj")
+    ]
     assert run("save_check.py", save_payload(block(payload)), tmp_path) is None
 
 
@@ -172,11 +215,17 @@ def test_save_check_stores_the_transcript_uuid_of_earlier_prompts(tmp_path):
     transcript.write_text(json.dumps(user("u1", "the people")) + "\n")
     payload = {"input_mode": "typed", "corrected_prompt": "fine", "mistakes": []}
     run("save_check.py", save_payload(block(payload)), tmp_path / "data", CLAUDE_CONFIG_DIR=str(config_dir))
-    run("save_check.py", save_payload(block(payload), turn_id="turn-2", prompt="next"), tmp_path / "data",
-        CLAUDE_CONFIG_DIR=str(config_dir))
+    run(
+        "save_check.py",
+        save_payload(block(payload), turn_id="turn-2", prompt="next"),
+        tmp_path / "data",
+        CLAUDE_CONFIG_DIR=str(config_dir),
+    )
     conn = connect(tmp_path / "data" / "grammar.db")
     assert conn.execute("SELECT turn_id, prompt_uuid FROM prompts ORDER BY id").fetchall() == [
-        ("turn-1", "u1"), ("turn-2", None)]
+        ("turn-1", "u1"),
+        ("turn-2", None),
+    ]
 
 
 def unwritable(tmp_path):

@@ -1,6 +1,10 @@
 import sqlite3
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
+
+from lib.mistake_types import ADDED_IN_2, ADDED_IN_6, ROMANCE_TEXTS_5, SEED, SPANISH_TEXTS_4, WORD_CHOICE_1
+from lib.transcript import Check
 
 # turn_id is the engine's key for the turn and the dedupe key. prompt_uuid is the prompt's uuid in the transcript,
 # empty until `query.py rekey` finds it.
@@ -43,101 +47,7 @@ MISTAKES_DDL = """CREATE TABLE {name} (
     UNIQUE (type, identifier)
 )"""
 
-# (key, label, description, example, identifier rule shown to the model); position is the index + 1.
-SEED = (
-    ("spelling", "spelling", "A word written with wrong, missing or extra letters.",
-     '"necesity" instead of "necessity"',
-     'the correct word ("necessity" for "necesity")'),
-    ("irregular_verb", "irregular verb", "An irregular verb in the wrong form, usually its past or past participle.",
-     '"know" instead of "known"',
-     'the base form of the verb, never the past forms ("know" for "I have know")'),
-    ("phrasal_verb", "phrasal verb", "The wrong verb + particle combination for the meaning.",
-     '"get off" instead of "get out"',
-     'the correct phrasal verb ("get out" for "get off the house")'),
-    ("wrong_tense", "wrong tense", "A real tense, but not the one the meaning needs.",
-     '"simple past" instead of "present perfect"',
-     'the used tense and the correct one, as is ("\\"simple past\\" instead of \\"present perfect\\"")'),
-    ("malformed_tense", "malformed tense",
-     "The right tense built wrong: auxiliaries wrong, missing, extra or in the wrong place.",
-     '"you have been at the mall?" instead of "have you been at the mall?"',
-     'the correct auxiliaries in correct order ("have you been" for "you have been at the mall?", "have arrived" for '
-     '"I am arrived")'),
-    ("word_order", "word order", "Words in the order your native language uses instead of the order English uses.",
-     '"the strategy of my cousin" instead of "my cousin\'s strategy"',
-     'the pattern the user was replicating from their native language ("expressing belonging" for "the strategy of '
-     'my cousin")'),
-    ("native_expression", "native expression", "Correct English that a native speaker would say another way.",
-     '"a practical course will be preferred" instead of "a hands-on course would be preferred"',
-     'the correct native expression ("hands-on" for "a practical course")'),
-    ("preposition", "preposition", "A wrong, missing or extra preposition.",
-     '"depend of" instead of "depend on"',
-     'the correct word and preposition ("depend on" for "depend of")'),
-    ("article", "article", 'A wrong, missing or extra "a/an" or "the".',
-     '"the people are selfish" instead of "people are selfish"',
-     'the correct article use: "a/an", "the" or "no article" ("no article" for "the people are selfish")'),
-    ("agreement", "agreement", "A verb, noun or adjective that does not match its subject or its number.",
-     '"he have" instead of "he has"',
-     'the agreement rule: "third person -s", "there is/there are", "plural noun", "adjectives take no plural" '
-     '("different" for "differents options"), ...'),
-    ("word_choice", "word choice", "A real English word that does not mean what you meant.",
-     '"button" instead of "key"',
-     'the correct word ("key" for "press the G button")'),
-    ("false_friend", "false friend", "An English word that looks like a word of your native language but means something else.",
-     '"actually" instead of "currently"',
-     'the false friend used, never the correct word ("actually" for "I am actually working on it", meant as '
-     '"currently")'),
-    ("countability", "countability", "An uncountable noun used with a/an or in the plural.",
-     '"a research" instead of "research"',
-     'the noun in its correct form ("research" for "a research", "information" for "informations")'),
-    ("missing_subject", "missing subject", "A clause without its subject, which English always needs.",
-     '"is important" instead of "it is important"',
-     'the missing subject ("it" for "is important to test")'),
-    ("verb_pattern", "verb pattern",
-     "The wrong form after a verb or a preposition: to-infinitive, base form, -ing or that-clause.",
-     '"I want that you check" instead of "I want you to check"',
-     'the word and the form it takes ("want + object + to-infinitive" for "I want that you check")'),
-    ("question_form", "question form",
-     "A direct question without inversion or do, or an indirect question in question order.",
-     '"tell me what is it" instead of "tell me what it is"',
-     'the rule broken: "no inversion in a direct question", "question order in an indirect question", '
-     '"missing do/does/did" or "missing if/whether"'),
-    ("pronoun", "pronoun",
-     "A wrong pronoun or possessive: he or she for a thing, a possessive that agrees with the thing owned instead of "
-     "the owner, or a subject pronoun where an object pronoun belongs, or the reverse.",
-     '"my sister and his husband" instead of "my sister and her husband"',
-     'the rule broken: "it for things" ("she returns" for a function), "possessive follows the owner" ("his husband" '
-     'for my sister\'s husband), "subject pronoun" ("me and my team will"), "object pronoun" ("between you and I"), ...'),
-    ("other", "other", "Any mistake that fits none of the types above.", None,
-     "a short description of the mistake"),
-)
 VERSION = 6
-# Types that version 2 adds, and the word_choice text of version 1 that version 2 rewrites.
-ADDED_IN_2 = ("false_friend", "countability", "missing_subject", "verb_pattern", "question_form")
-WORD_CHOICE_1 = ("A real English word that does not mean what you meant, false friends included.",
-                 '"actually" instead of "currently"',
-                 'the correct word, false friends included ("currently" for "actually")')
-# The (description, identifier_rule) of each type that names Spanish up to version 4, which version 5 rewrites to
-# name no language.
-SPANISH_TEXTS_4 = {
-    "word_order": ("Words in the order Spanish uses instead of the order English uses.",
-                   'the pattern the user was replicating from Spanish ("expressing belonging" for "the strategy of my '
-                   'cousin")'),
-    "false_friend": ("An English word that looks like a Spanish word but means something else.",
-                     'the false friend used, never the correct word ("actually" for "I am actually working on it", '
-                     'meant as "currently")'),
-    "missing_subject": ('A clause without its subject, as Spanish allows ("es importante").',
-                        'the missing subject ("it" for "is important to test")'),
-}
-
-# The type that version 6 adds, and the (description, identifier_rule) of each type that version 6 rewrites to cover
-# mistakes of Romance-language speakers, as they are up to version 5.
-ADDED_IN_6 = ("pronoun",)
-ROMANCE_TEXTS_5 = {
-    "malformed_tense": ("The right tense built wrong: auxiliaries missing, extra or in the wrong place.",
-                        'the auxiliaries in correct order ("have you been" for "you have been at the mall?")'),
-    "agreement": ("A verb or noun that does not match its subject or its number.",
-                  'the agreement rule: "third person -s", "there is/there are", "plural noun", ...'),
-}
 
 
 class NewerDatabaseError(Exception):
@@ -168,7 +78,7 @@ class SavedOccurrence:
     count: int
 
 
-def connect(path):
+def connect(path: str | Path) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=5, isolation_level=None)
     try:
@@ -177,17 +87,19 @@ def connect(path):
         conn.close()
         raise
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.isolation_level = ""
+    conn.isolation_level = "DEFERRED"
     return conn
 
 
-def _check_not_newer(version):
+def _check_not_newer(version: int) -> None:
     if version > VERSION:
-        raise NewerDatabaseError(f"grammar.db is at version {version}, and this grammar tracker reads version {VERSION}"
-                                 f" or older. Update the grammar-tracker mod.")
+        raise NewerDatabaseError(
+            f"grammar.db is at version {version}, and this grammar tracker reads version {VERSION}"
+            f" or older. Update the grammar-tracker mod."
+        )
 
 
-def _migrate(conn):
+def _migrate(conn: sqlite3.Connection) -> None:
     """Bring the database to VERSION in one transaction. A database at VERSION is not locked. Otherwise the write
     lock is taken before the version is read again, so concurrent hooks migrate once. Foreign keys stay off until
     the mistakes table is rebuilt. A database newer than VERSION raises NewerDatabaseError and stays unchanged."""
@@ -221,139 +133,182 @@ def _migrate(conn):
         raise
 
 
-
-def _create(conn):
+def _create(conn: sqlite3.Connection) -> None:
     """Create the tables and seed the types. An existing mistakes table is rebuilt with a foreign key to
     mistake_types; its unknown types become 'other' and the rows that then collide are merged."""
     for statement in SCHEMA:
         conn.execute(statement)
-    conn.executemany("INSERT INTO mistake_types (key, label, description, example, identifier_rule, position)"
-                     " VALUES (?, ?, ?, ?, ?, ?)", [(*row, i) for i, row in enumerate(SEED, 1)])
+    conn.executemany(
+        "INSERT INTO mistake_types (key, label, description, example, identifier_rule, position)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        [(*row, i) for i, row in enumerate(SEED, 1)],
+    )
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mistakes'").fetchone():
         conn.execute(MISTAKES_DDL.format(name="mistakes_new"))
         resolved = "CASE WHEN {0}.type IN (SELECT key FROM mistake_types) THEN {0}.type ELSE 'other' END"
-        conn.execute(f"INSERT INTO mistakes_new (id, type, identifier)"
-                     f" SELECT MIN(id), {resolved.format('m')}, identifier FROM mistakes m GROUP BY 2, 3")
-        conn.execute(f"UPDATE occurrences SET mistake_id = (SELECT n.id FROM mistakes o JOIN mistakes_new n"
-                     f" ON n.type = {resolved.format('o')} AND n.identifier = o.identifier"
-                     f" WHERE o.id = occurrences.mistake_id)")
+        conn.execute(
+            f"INSERT INTO mistakes_new (id, type, identifier)"
+            f" SELECT MIN(id), {resolved.format('m')}, identifier FROM mistakes m GROUP BY 2, 3"
+        )
+        conn.execute(
+            f"UPDATE occurrences SET mistake_id = (SELECT n.id FROM mistakes o JOIN mistakes_new n"
+            f" ON n.type = {resolved.format('o')} AND n.identifier = o.identifier"
+            f" WHERE o.id = occurrences.mistake_id)"
+        )
         conn.execute("DROP TABLE mistakes")
         conn.execute("ALTER TABLE mistakes_new RENAME TO mistakes")
     else:
         conn.execute(MISTAKES_DDL.format(name="mistakes"))
 
 
-def _add_types_of_2(conn):
+def _add_types_of_2(conn: sqlite3.Connection) -> None:
     """Add the version 2 types after the last type that is not 'other', and keep 'other' last. word_choice gets its
     version 2 text only while it still has the version 1 text, so edits stay."""
     _add_before_other(conn, ADDED_IN_2)
     word_choice = next(row for row in SEED if row[0] == "word_choice")
-    conn.execute("UPDATE mistake_types SET description = ?, example = ?, identifier_rule = ?"
-                 " WHERE key = 'word_choice' AND description = ? AND example = ? AND identifier_rule = ?",
-                 (*word_choice[2:], *WORD_CHOICE_1))
+    conn.execute(
+        "UPDATE mistake_types SET description = ?, example = ?, identifier_rule = ?"
+        " WHERE key = 'word_choice' AND description = ? AND example = ? AND identifier_rule = ?",
+        (*word_choice[2:], *WORD_CHOICE_1),
+    )
 
-def _add_before_other(conn, keys):
+
+def _add_before_other(conn: sqlite3.Connection, keys: Collection[str]) -> None:
     """Add the SEED types of `keys` after the last type that is not 'other', and keep 'other' last."""
     (last,) = conn.execute("SELECT MAX(position) FROM mistake_types WHERE key != 'other'").fetchone()
     rows = [row for row in SEED if row[0] in keys]
-    conn.executemany("INSERT OR IGNORE INTO mistake_types (key, label, description, example, identifier_rule,"
-                     " position) VALUES (?, ?, ?, ?, ?, ?)", [(*row, last + i) for i, row in enumerate(rows, 1)])
+    conn.executemany(
+        "INSERT OR IGNORE INTO mistake_types (key, label, description, example, identifier_rule,"
+        " position) VALUES (?, ?, ?, ?, ?, ?)",
+        [(*row, last + i) for i, row in enumerate(rows, 1)],
+    )
     conn.execute("UPDATE mistake_types SET position = ? WHERE key = 'other'", (last + len(rows) + 1,))
 
 
-def _rewrite_unedited(conn, old_texts):
+def _rewrite_unedited(conn: sqlite3.Connection, old_texts: dict[str, tuple[str, str]]) -> None:
     """Give each type of `old_texts` its SEED description and identifier rule, only while it still has the old text
     that `old_texts` maps it to, so edits stay."""
     seed = {row[0]: row for row in SEED}
-    conn.executemany("UPDATE mistake_types SET description = ?, identifier_rule = ?"
-                     " WHERE key = ? AND description = ? AND identifier_rule = ?",
-                     [(seed[key][2], seed[key][4], key, *old) for key, old in old_texts.items()])
+    conn.executemany(
+        "UPDATE mistake_types SET description = ?, identifier_rule = ?"
+        " WHERE key = ? AND description = ? AND identifier_rule = ?",
+        [(seed[key][2], seed[key][4], key, *old) for key, old in old_texts.items()],
+    )
 
 
-def _cover_romance(conn):
+def _cover_romance(conn: sqlite3.Connection) -> None:
     """Add the version 6 types before 'other' and give the types of ROMANCE_TEXTS_5 their version 6 text."""
     _add_before_other(conn, ADDED_IN_6)
     _rewrite_unedited(conn, ROMANCE_TEXTS_5)
 
 
-def _remove_spanish(conn):
+def _remove_spanish(conn: sqlite3.Connection) -> None:
     """Give the types of SPANISH_TEXTS_4 their version 5 text, which names no language. A type gets it only while it
     still has its version 4 text, so edits stay."""
     _rewrite_unedited(conn, SPANISH_TEXTS_4)
 
 
-def _add_reason(conn):
+def _add_reason(conn: sqlite3.Connection) -> None:
     """Add the reason column of version 3 to occurrences. Occurrences saved before it have no reason."""
     columns = [row[1] for row in conn.execute("PRAGMA table_info(occurrences)")]
     if "reason" not in columns:
         conn.execute("ALTER TABLE occurrences ADD COLUMN reason TEXT")
 
 
-def _add_turn_id(conn):
+def _add_turn_id(conn: sqlite3.Connection) -> None:
     """Rebuild prompts of versions before 4 with the turn_id column and a nullable prompt_uuid. Rows keep their ids,
     so occurrences stay linked, and their prompt_uuid."""
     columns = [row[1] for row in conn.execute("PRAGMA table_info(prompts)")]
     if "turn_id" in columns:
         return
     conn.execute(PROMPTS_DDL.format(name="prompts_new"))
-    conn.execute("INSERT INTO prompts_new (id, prompt_uuid, session_id, created_at, project_dir, input_mode, original,"
-                 " corrected) SELECT id, prompt_uuid, session_id, created_at, project_dir, input_mode, original,"
-                 " corrected FROM prompts")
+    conn.execute(
+        "INSERT INTO prompts_new (id, prompt_uuid, session_id, created_at, project_dir, input_mode, original,"
+        " corrected) SELECT id, prompt_uuid, session_id, created_at, project_dir, input_mode, original,"
+        " corrected FROM prompts"
+    )
     conn.execute("DROP TABLE prompts")
     conn.execute("ALTER TABLE prompts_new RENAME TO prompts")
 
 
-def _types(conn, where=""):
-    rows = conn.execute(f"SELECT key, label, description, example, identifier_rule, position, deleted_at"
-                        f" FROM mistake_types {where} ORDER BY position").fetchall()
+def _types(conn: sqlite3.Connection, where: str = "") -> list[MistakeType]:
+    rows = conn.execute(
+        f"SELECT key, label, description, example, identifier_rule, position, deleted_at"
+        f" FROM mistake_types {where} ORDER BY position"
+    ).fetchall()
     return [MistakeType(*row) for row in rows]
 
 
-def active_types(conn):
+def active_types(conn: sqlite3.Connection) -> list[MistakeType]:
     return _types(conn, "WHERE deleted_at IS NULL")
 
 
-def all_types(conn):
+def all_types(conn: sqlite3.Connection) -> list[MistakeType]:
     return _types(conn)
 
 
-def save_check(conn, *, turn_id, session_id, created_at, project_dir, original, check, prompt_uuid=None):
+def save_check(
+    conn: sqlite3.Connection,
+    *,
+    turn_id: str,
+    session_id: str | None,
+    created_at: str,
+    project_dir: str | None,
+    original: str,
+    check: Check,
+    prompt_uuid: str | None = None,
+) -> list[SavedOccurrence] | None:
     """Save a prompt and its mistakes. Return the saved occurrences with their total counts,
     or None when the turn is already saved."""
     with conn:
         cursor = conn.execute(
             "INSERT OR IGNORE INTO prompts (turn_id, prompt_uuid, session_id, created_at, project_dir, input_mode,"
             " original, corrected) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (turn_id, prompt_uuid, session_id, created_at, project_dir, check.input_mode, original, check.corrected_prompt),
+            (
+                turn_id,
+                prompt_uuid,
+                session_id,
+                created_at,
+                project_dir,
+                check.input_mode,
+                original,
+                check.corrected_prompt,
+            ),
         )
         if cursor.rowcount == 0:
             return None
         prompt_id = cursor.lastrowid
-        mistake_ids = []
-        types = []
+        mistake_ids: list[int] = []
+        types: list[str] = []
         for mistake in check.mistakes:
-            known = conn.execute("SELECT 1 FROM mistake_types WHERE key = ? AND deleted_at IS NULL",
-                                 (mistake.type,)).fetchone()
+            known = conn.execute(
+                "SELECT 1 FROM mistake_types WHERE key = ? AND deleted_at IS NULL", (mistake.type,)
+            ).fetchone()
             type_ = mistake.type if known else "other"
-            conn.execute("INSERT OR IGNORE INTO mistakes (type, identifier) VALUES (?, ?)",
-                         (type_, mistake.identifier))
-            (mistake_id,) = conn.execute("SELECT id FROM mistakes WHERE type = ? AND identifier = ?",
-                                         (type_, mistake.identifier)).fetchone()
+            conn.execute("INSERT OR IGNORE INTO mistakes (type, identifier) VALUES (?, ?)", (type_, mistake.identifier))
+            (mistake_id,) = conn.execute(
+                "SELECT id FROM mistakes WHERE type = ? AND identifier = ?", (type_, mistake.identifier)
+            ).fetchone()
             types.append(type_)
-            conn.execute("INSERT INTO occurrences (prompt_id, mistake_id, original_sentence, corrected_sentence,"
-                         " reason) VALUES (?, ?, ?, ?, ?)",
-                         (prompt_id, mistake_id, mistake.original, mistake.corrected, mistake.reason))
+            conn.execute(
+                "INSERT INTO occurrences (prompt_id, mistake_id, original_sentence, corrected_sentence,"
+                " reason) VALUES (?, ?, ?, ?, ?)",
+                (prompt_id, mistake_id, mistake.original, mistake.corrected, mistake.reason),
+            )
             mistake_ids.append(mistake_id)
-    return [
-        SavedOccurrence(*conn.execute("SELECT key, label, description, example FROM mistake_types WHERE key = ?",
-                                      (type_,)).fetchone(),
-                        m.identifier, m.original, m.corrected, m.reason,
-                        conn.execute("SELECT COUNT(*) FROM occurrences WHERE mistake_id = ?", (mid,)).fetchone()[0])
-        for m, type_, mid in zip(check.mistakes, types, mistake_ids)
-    ]
+    saved = []
+    for m, type_, mid in zip(check.mistakes, types, mistake_ids, strict=True):
+        key, label, description, example = conn.execute(
+            "SELECT key, label, description, example FROM mistake_types WHERE key = ?", (type_,)
+        ).fetchone()
+        (count,) = conn.execute("SELECT COUNT(*) FROM occurrences WHERE mistake_id = ?", (mid,)).fetchone()
+        saved.append(
+            SavedOccurrence(key, label, description, example, m.identifier, m.original, m.corrected, m.reason, count)
+        )
+    return saved
 
 
-def top_mistakes(conn, limit):
+def top_mistakes(conn: sqlite3.Connection, limit: int) -> list[SavedOccurrence]:
     """Return the most frequent mistakes across all prompts, each with its latest occurrence as the example."""
     rows = conn.execute(
         "SELECT t.key, t.label, t.description, t.example, m.identifier, latest.original_sentence,"

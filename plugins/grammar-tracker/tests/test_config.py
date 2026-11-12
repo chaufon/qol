@@ -5,8 +5,14 @@ from conftest import ROOT, script_env
 
 
 def data_folder(home, **env):
-    result = subprocess.run([sys.executable, "-c", "from lib import config; print(config.HOME)"], capture_output=True,
-                            text=True, env=script_env(home, **env), cwd=ROOT / "scripts", check=True)
+    result = subprocess.run(
+        [sys.executable, "-c", "from lib import config; print(config.HOME)"],
+        capture_output=True,
+        text=True,
+        env=script_env(home, **env),
+        cwd=ROOT / "scripts",
+        check=True,
+    )
     return result.stdout.strip()
 
 
@@ -20,8 +26,9 @@ def test_data_folder_follows_claude_config_dir(tmp_path):
 
 
 def test_data_folder_follows_claude_code_plugin_cache_dir(tmp_path):
-    folder = data_folder(tmp_path, CLAUDE_CONFIG_DIR=str(tmp_path / "config"),
-                         CLAUDE_CODE_PLUGIN_CACHE_DIR=str(tmp_path / "plugins"))
+    folder = data_folder(
+        tmp_path, CLAUDE_CONFIG_DIR=str(tmp_path / "config"), CLAUDE_CODE_PLUGIN_CACHE_DIR=str(tmp_path / "plugins")
+    )
     assert folder == str(tmp_path / "plugins" / "data" / "grammar-tracker-qol")
 
 

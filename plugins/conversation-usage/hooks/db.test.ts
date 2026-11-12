@@ -3,20 +3,23 @@ import type { EngineInterface } from 'claude-code'
 
 import { exec, loadWindows, openDb, query } from './db'
 
-type Call = { argv: string[]; stdin: string }
+interface Call {
+  argv: string[]
+  stdin: string
+}
 
 // An in-memory `$`: every process.run call is recorded and answered by `reply`.
 function fake(reply: (call: Call) => { exitCode: number; stdout: string; stderr?: string } | Error) {
   const calls: Call[] = []
   const $ = {
-    env: { get: async (name: string) => (name === 'HOME' ? '/home/u' : undefined) },
+    env: { get: (name: string) => Promise.resolve(name === 'HOME' ? '/home/u' : undefined) },
     process: {
-      run: async (argv: readonly string[], options?: { stdin?: string }) => {
+      run: (argv: readonly string[], options?: { stdin?: string }) => {
         const call = { argv: [...argv], stdin: options?.stdin ?? '' }
         calls.push(call)
         const r = reply(call)
-        if (r instanceof Error) throw r
-        return { stderr: '', isStdoutTruncated: false, isStderrTruncated: false, ...r }
+        if (r instanceof Error) return Promise.reject(r)
+        return Promise.resolve({ stderr: '', isStdoutTruncated: false, isStderrTruncated: false, ...r })
       },
     },
   } as unknown as EngineInterface
@@ -40,12 +43,12 @@ test('openDb creates the schema in the config directory', async () => {
 
 test('query maps empty output to no rows', async () => {
   const { $ } = fake(() => ({ exitCode: 0, stdout: '' }))
-  expect(await query($, db, 'SELECT 1', (row) => row)).toEqual([])
+  expect(await query($, db, 'SELECT 1', row => row)).toEqual([])
 })
 
 test('query maps each row', async () => {
   const { $ } = fake(() => ({ exitCode: 0, stdout: '[{"a":1},{"a":2}]\n' }))
-  expect(await query($, db, 'SELECT a', (row) => Number(row.a))).toEqual([1, 2])
+  expect(await query($, db, 'SELECT a', row => Number(row.a))).toEqual([1, 2])
 })
 
 test('the stdin starts with the busy timeout', async () => {
@@ -76,7 +79,7 @@ test('openDb reports the message of a failing sqlite3', async () => {
 
 test('a truncated stdout throws a clear one-line error', async () => {
   const { $ } = fake(() => ({ exitCode: 0, stdout: '[{"a":', isStdoutTruncated: true }))
-  await expect(query($, db, 'SELECT a', (row) => row)).rejects.toThrow('Usage history result is too large')
+  await expect(query($, db, 'SELECT a', row => row)).rejects.toThrow('Usage history result is too large')
 })
 
 test('openDb reports a timeout or bad output under its own message, not as a missing sqlite3', async () => {

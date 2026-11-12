@@ -7,8 +7,18 @@ const H = 3_600_000
 const at = (hour: number) => Date.UTC(2026, 9, 28, hour)
 const iso = (hour: number) => new Date(at(hour)).toISOString()
 
-const five = (start: number, end: number, percentUsed: number): Window => ({ kind: 'five_hour', start, end, percentUsed })
-const seven = (start: number, end: number, percentUsed: number): Window => ({ kind: 'seven_day', start, end, percentUsed })
+const five = (start: number, end: number, percentUsed: number): Window => ({
+  kind: 'five_hour',
+  start,
+  end,
+  percentUsed,
+})
+const seven = (start: number, end: number, percentUsed: number): Window => ({
+  kind: 'seven_day',
+  start,
+  end,
+  percentUsed,
+})
 
 test('window lengths are 5 hours and 7 days', () => {
   expect(WINDOW_MS.five_hour).toBe(5 * H)
@@ -62,11 +72,7 @@ test('windows of one kind do not affect the other', () => {
 })
 
 test('currentWindows returns the windows containing now, five-hour first', () => {
-  const stored = [
-    seven(at(0), at(0) + 7 * 24 * H, 10),
-    five(at(6), at(9), 50),
-    five(at(12), at(17), 20),
-  ]
+  const stored = [seven(at(0), at(0) + 7 * 24 * H, 10), five(at(6), at(9), 50), five(at(12), at(17), 20)]
   expect(currentWindows(stored, at(13))).toEqual([five(at(12), at(17), 20), seven(at(0), at(0) + 7 * 24 * H, 10)])
   expect(currentWindows(stored, at(10))).toEqual([seven(at(0), at(0) + 7 * 24 * H, 10)])
 })
@@ -81,7 +87,8 @@ test('a reading that ends at or before now with no live window is ignored', () =
 test('a drop to 1 % or less with a different end is a reset; a larger drop is a move', () => {
   const stored = [five(at(12), at(17), 60)]
   expect(observe(stored, { kind: 'five_hour', percentUsed: 1, resetsAt: iso(19) }, at(14))).toEqual([
-    five(at(12), at(14), 60), five(at(14), at(19), 1),
+    five(at(12), at(14), 60),
+    five(at(14), at(19), 1),
   ])
   expect(observe(stored, { kind: 'five_hour', percentUsed: 1.5, resetsAt: iso(19) }, at(14))).toEqual([
     five(at(12), at(19), 1.5),

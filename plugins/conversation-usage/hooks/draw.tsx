@@ -1,35 +1,63 @@
 import type { Elements } from 'claude-code'
 
 import type {
-  Conversation, Costs, Grouping, History, PriceBook, Rates, Request, Tab, Tokens, Usage, View, WindowTotal,
+  Conversation,
+  Costs,
+  Grouping,
+  History,
+  PriceBook,
+  Rates,
+  Request,
+  Tab,
+  Tokens,
+  Usage,
+  View,
+  WindowTotal,
 } from '../types'
 import { COLORS, fmtCost, fmtDay, fmtPrice, fmtTokens, hhmm, weekday } from './format'
 import { conversationRows, historyTree, promptGroups, sumUsage } from './model'
 import type { Node, PromptGroup, Row } from './model'
 import { PRICING_URL, ZERO_TOKENS } from './prices'
 
-export type Actions = {
-  toggle(key: string, isOpen: boolean): void
-  nextView(): void
-  nextTab(): void
-  nextGrouping(): void
-  selectTab(t: Tab): void
-  selectView(v: View): void
-  selectGrouping(g: Grouping): void
-  hide(): void
-  loadDetails(conversationId: string): void
+export interface Actions {
+  toggle: (key: string, isOpen: boolean) => void
+  nextView: () => void
+  nextTab: () => void
+  nextGrouping: () => void
+  selectTab: (t: Tab) => void
+  selectView: (v: View) => void
+  selectGrouping: (g: Grouping) => void
+  hide: () => void
+  loadDetails: (conversationId: string) => void
 }
 
-export type PaneProps = {
-  width: number; tab: Tab; view: View; grouping: Grouping; current: Conversation | null
-  windowTotals: WindowTotal[]; history: History; details: Record<string, Conversation>
-  expanded: Record<string, boolean>; notice: string | null; now: number; isFullscreen: boolean; prices: PriceBook
+export interface PaneProps {
+  width: number
+  tab: Tab
+  view: View
+  grouping: Grouping
+  current: Conversation | null
+  windowTotals: WindowTotal[]
+  history: History
+  details: Record<string, Conversation>
+  expanded: Record<string, boolean>
+  notice: string | null
+  now: number
+  isFullscreen: boolean
+  prices: PriceBook
   scroll: { offset: number; bodyRows: number }
 }
 
 type Ui = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 type El = JSX.Element
-type Ctx = { ui: Ui; view: View; width: number; isFullscreen: boolean; scale: number; actions: Actions }
+interface Ctx {
+  ui: Ui
+  view: View
+  width: number
+  isFullscreen: boolean
+  scale: number
+  actions: Actions
+}
 
 const HOVER = { backgroundColor: '#3a3f4b' }
 const ACCENT = 'planMode'
@@ -45,8 +73,17 @@ const MARK = 4
 const FIGURES = 5 * COL
 const CHART_TOOLS = 12
 const TOKEN_COLORS = [COLORS.input, COLORS.cacheWrite, COLORS.cacheRead, COLORS.output]
-const VIEWS: [View, string][] = [['tokens', 'Tokens'], ['cost', 'Cost'], ['both', 'Both'], ['chart', 'Chart']]
-const GROUPINGS: [Grouping, string][] = [['date', 'Date'], ['project', 'Project'], ['window', 'Window']]
+const VIEWS: [View, string][] = [
+  ['tokens', 'Tokens'],
+  ['cost', 'Cost'],
+  ['both', 'Both'],
+  ['chart', 'Chart'],
+]
+const GROUPINGS: [Grouping, string][] = [
+  ['date', 'Date'],
+  ['project', 'Project'],
+  ['window', 'Window'],
+]
 
 const cell = (s: string, w: number): string => (s.length > w ? `${s.slice(0, Math.max(0, w - 1))}…` : s.padEnd(w))
 const rcell = (s: string, w: number): string => s.padStart(w)
@@ -60,15 +97,19 @@ export const barSegments = (tokens: Tokens, scale: number, width: number): [numb
   const sum = parts.reduce((a, b) => a + b, 0)
   if (sum <= 0 || scale <= 0 || width <= 0) return [0, 0, 0, 0]
   const target = Math.min(width, Math.max(1, Math.round((sum / scale) * width)))
-  const exact = parts.map((p) => (p / sum) * target)
-  const cells = exact.map(Math.floor)
-  let left = target - cells.reduce((a, b) => a + b, 0)
-  const order = exact.map((x, i) => i).sort((a, b) => exact[b]! - cells[b]! - (exact[a]! - cells[a]!))
-  for (const i of order) {
+  const shares = parts.map(part => {
+    const exact = (part / sum) * target
+    return { part, cells: Math.floor(exact), remainder: exact - Math.floor(exact) }
+  })
+  let left = target - shares.reduce((a, s) => a + s.cells, 0)
+  for (const share of [...shares].sort((a, b) => b.remainder - a.remainder)) {
     if (left <= 0) break
-    if (parts[i]! > 0) { cells[i]!++; left-- }
+    if (share.part > 0) {
+      share.cells++
+      left--
+    }
   }
-  return cells as [number, number, number, number]
+  return shares.map(s => s.cells) as [number, number, number, number]
 }
 
 const ZERO_COSTS: Costs = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, total: 0 }
@@ -86,11 +127,13 @@ function figures(ui: Ui, u: Usage, kind: 'tokens' | 'cost'): El[] {
   if (kind === 'tokens') {
     return [
       ...quad(u.tokens).map((v, i) => <Text color={TOKEN_COLORS[i]}>{rcell(fmtTokens(v), COL)}</Text>),
-      <Text bold color={WHITE}>{rcell(fmtTokens(total(u.tokens)), COL)}</Text>,
+      <Text weight="semibold" color={WHITE}>
+        {rcell(fmtTokens(total(u.tokens)), COL)}
+      </Text>,
     ]
   }
   const c = u.cost
-  return [c?.input, c?.cacheWrite, c?.cacheRead, c?.output, c?.total].map((v) => (
+  return [c?.input, c?.cacheWrite, c?.cacheRead, c?.output, c?.total].map(v => (
     <Text color={COLORS.cost}>{rcell(fmtCost(v ?? null), COL)}</Text>
   ))
 }
@@ -106,15 +149,19 @@ function viewLines(c: Ctx, head: (w: number) => El[], u: Usage, mark: Mark, scal
     const barW = Math.max(6, c.width - ARROW - headW - 2 * COL - MARK - 1)
     const seg = barSegments(u.tokens, scale, barW)
     const used = seg.reduce((a, b) => a + b, 0)
-    return [[
-      <Text>{arrow}</Text>,
-      ...head(headW),
-      ...seg.map((n, i) => <Text color={TOKEN_COLORS[i]}>{'█'.repeat(n)}</Text>),
-      <Text>{' '.repeat(barW - used + 1)}</Text>,
-      <Text bold color={WHITE}>{rcell(fmtTokens(total(u.tokens)), COL)}</Text>,
-      <Text color={COLORS.cost}>{rcell(fmtCost(u.cost?.total ?? null), COL)}</Text>,
-      <Text>{count}</Text>,
-    ]]
+    return [
+      [
+        <Text>{arrow}</Text>,
+        ...head(headW),
+        ...seg.map((n, i) => <Text color={TOKEN_COLORS[i]}>{'█'.repeat(n)}</Text>),
+        <Text>{' '.repeat(barW - used + 1)}</Text>,
+        <Text weight="semibold" color={WHITE}>
+          {rcell(fmtTokens(total(u.tokens)), COL)}
+        </Text>,
+        <Text color={COLORS.cost}>{rcell(fmtCost(u.cost?.total ?? null), COL)}</Text>,
+        <Text>{count}</Text>,
+      ],
+    ]
   }
   const tokens = [<Text>{arrow}</Text>, ...head(labelW), ...figures(c.ui, u, 'tokens'), <Text>{count}</Text>]
   const costs = [<Text>{arrow}</Text>, ...head(labelW), ...figures(c.ui, u, 'cost'), <Text>{count}</Text>]
@@ -128,22 +175,28 @@ function rowBox(c: Ctx, key: string, index: number, lines: El[], lead: string | 
   const { Box, Text } = c.ui
   return (
     <Box
-      key={`row:${key}`} flexDirection="column" backgroundColor={index % 2 === 1 ? STRIPE : undefined}
+      key={`row:${key}`}
+      flexDirection="column"
+      backgroundColor={index % 2 === 1 ? STRIPE : undefined}
       hover={c.isFullscreen ? HOVER : undefined}
     >
-      {lines.map((line) => (lead === null ? line : (
-        <Box>
-          <Text dimColor>{lead}</Text>
-          {line}
-        </Box>
-      )))}
+      {lines.map(line =>
+        lead === null ? (
+          line
+        ) : (
+          <Box>
+            <Text dimColor>{lead}</Text>
+            {line}
+          </Box>
+        ),
+      )}
     </Box>
   )
 }
 
 function rowHead(c: Ctx, r: Row): (w: number) => El[] {
   const { Text } = c.ui
-  return (w) => {
+  return w => {
     const bars = '┃'.repeat(r.depth)
     const toolsW = Math.max(8, w - NUM - TIME - r.depth)
     if (r.kind === 'request') {
@@ -158,7 +211,9 @@ function rowHead(c: Ctx, r: Row): (w: number) => El[] {
       <Text color={COLORS.subagent}>{bars}</Text>,
       <Text color={COLORS.subagent}>{cell('↳', NUM)}</Text>,
       <Text>{cell('', TIME)}</Text>,
-      <Text color={COLORS.subagent} underline>{cell(r.name, toolsW)}</Text>,
+      <Text color={COLORS.subagent} underline>
+        {cell(r.name, toolsW)}
+      </Text>,
     ]
   }
 }
@@ -170,11 +225,28 @@ function conversationView(c: Ctx, rows: Row[], lead: string | null): El[] {
     const mark = r.kind === 'subagent' ? marker(r.isOpen, r.count) : NO_MARK
     const scale = r.kind === 'request' ? c.scale : total(r.usage.tokens)
     const lines = viewLines(c, rowHead(c, r), r.usage, mark, scale)
-    if (r.kind === 'request') return rowBox(c, r.key, i, lines.map((l) => <Text>{l}</Text>), lead)
-    const press = () => c.actions.toggle(r.key, r.isOpen)
-    return rowBox(c, r.key, i, lines.map((l, n) => (
-      <Button key={n === 0 ? r.key : `${r.key}:more`} plain onPress={press}>{l}</Button>
-    )), lead)
+    if (r.kind === 'request')
+      return rowBox(
+        c,
+        r.key,
+        i,
+        lines.map(l => <Text>{l}</Text>),
+        lead,
+      )
+    const press = () => {
+      c.actions.toggle(r.key, r.isOpen)
+    }
+    return rowBox(
+      c,
+      r.key,
+      i,
+      lines.map((l, n) => (
+        <Button key={n === 0 ? r.key : `${r.key}:more`} plain onPress={press}>
+          {l}
+        </Button>
+      )),
+      lead,
+    )
   })
 }
 
@@ -187,10 +259,14 @@ function columnLine(c: Ctx, head: (w: number) => string, names: string[], count:
     const headW = NUM + TIME + CHART_TOOLS
     const barW = Math.max(6, c.width - ARROW - headW - 2 * COL - MARK - 1)
     const [bar, ...rest] = names
-    return <Text dimColor>{`${lead}${head(headW)}${cell(bar!, barW + 1)}${rest.map((n) => rcell(n, COL)).join('')}${rcell(count, MARK)}`}</Text>
+    return (
+      <Text
+        dimColor
+      >{`${lead}${head(headW)}${cell(bar ?? '', barW + 1)}${rest.map(n => rcell(n, COL)).join('')}${rcell(count, MARK)}`}</Text>
+    )
   }
   const labelW = c.width - ARROW - FIGURES - MARK
-  return <Text dimColor>{`${lead}${head(labelW)}${names.map((n) => rcell(n, COL)).join('')}${rcell(count, MARK)}`}</Text>
+  return <Text dimColor>{`${lead}${head(labelW)}${names.map(n => rcell(n, COL)).join('')}${rcell(count, MARK)}`}</Text>
 }
 
 const NAMES = ['input', 'c.write', 'c.read', 'output', 'total']
@@ -207,8 +283,10 @@ function ruleLine(c: Ctx, head: (w: number) => string, count: string): El {
   return columnLine(c, head, names, count === '' ? '' : dashes(MARK))
 }
 
-const requestHead = (w: number): string => `${cell('#', NUM)}${cell('time', TIME)}${cell('prompt / tools', w - NUM - TIME)}`
-const requestRule = (w: number): string => `${cell(dashes(NUM), NUM)}${cell(dashes(TIME), TIME)}${cell(dashes(w - NUM - TIME), w - NUM - TIME)}`
+const requestHead = (w: number): string =>
+  `${cell('#', NUM)}${cell('time', TIME)}${cell('prompt / tools', w - NUM - TIME)}`
+const requestRule = (w: number): string =>
+  `${cell(dashes(NUM), NUM)}${cell(dashes(TIME), TIME)}${cell(dashes(w - NUM - TIME), w - NUM - TIME)}`
 const blank = (w: number): string => ' '.repeat(w)
 
 function legend(c: Ctx): El {
@@ -216,13 +294,16 @@ function legend(c: Ctx): El {
   const names = ['input', 'c.write', 'c.read', 'output']
   return (
     <Text>
-      {names.map((n, i) => <Text color={TOKEN_COLORS[i]}>{`█ ${n}${i < 3 ? '  ' : ''}`}</Text>)}
+      {names.map((n, i) => (
+        <Text color={TOKEN_COLORS[i]}>{`█ ${n}${i < 3 ? '  ' : ''}`}</Text>
+      ))}
     </Text>
   )
 }
 
 // The largest request total fills the bar.
-const scaleOf = (rows: Row[]): number => Math.max(1, ...rows.filter((r) => r.kind === 'request').map((r) => total(r.usage.tokens)))
+const scaleOf = (rows: Row[]): number =>
+  Math.max(1, ...rows.filter(r => r.kind === 'request').map(r => total(r.usage.tokens)))
 
 function totalsView(c: Ctx, requests: Request[], windowTotals: WindowTotal[]): El[] {
   const { Box, Text } = c.ui
@@ -231,17 +312,29 @@ function totalsView(c: Ctx, requests: Request[], windowTotals: WindowTotal[]): E
     const lines = viewLines(c, head, usage, NO_MARK, total(usage.tokens))
     out.push(
       <Box key={`total:${key}`} flexDirection="column" backgroundColor={background}>
-        {lines.map((l) => <Text>{l}</Text>)}
+        {lines.map(l => (
+          <Text>{l}</Text>
+        ))}
       </Box>,
     )
   }
   const usage = requests.length === 0 ? { tokens: ZERO_TOKENS, cost: ZERO_COSTS } : sumUsage(requests)
-  one('conversation', usage, (w) => [<Text bold color={WHITE}>{cell('Conversation', w)}</Text>], BAND)
+  one(
+    'conversation',
+    usage,
+    w => [
+      <Text weight="semibold" color={WHITE}>
+        {cell('Conversation', w)}
+      </Text>,
+    ],
+    BAND,
+  )
   for (const t of windowTotals) {
-    const label = t.window.kind === 'five_hour'
-      ? `5-hour window (${hhmm(t.window.end)})`
-      : `7-day window (${weekday(t.window.end)})`
-    one(t.window.kind, t.usage, (w) => [<Text color={COLORS.accent}>{cell(label, w)}</Text>])
+    const label =
+      t.window.kind === 'five_hour'
+        ? `5-hour window (${hhmm(t.window.end)})`
+        : `7-day window (${weekday(t.window.end)})`
+    one(t.window.kind, t.usage, w => [<Text color={COLORS.accent}>{cell(label, w)}</Text>])
   }
   return out
 }
@@ -250,24 +343,34 @@ function totalsView(c: Ctx, requests: Request[], windowTotals: WindowTotal[]): E
 // `scale` fills the prompt's bar; `rowScale` the bars of its requests.
 function promptView(c: Ctx, g: PromptGroup, scale: number, rowScale: number, lead: string | null, index: number): El {
   const { Box, Button, Text } = c.ui
-  const press = () => c.actions.toggle(g.key, g.isOpen)
+  const press = () => {
+    c.actions.toggle(g.key, g.isOpen)
+  }
   const head = (w: number) => [
     <Text dimColor>{cell(g.at === null ? '' : String(g.number), NUM)}</Text>,
     <Text dimColor>{cell(g.at === null ? '' : hhmm(g.at), TIME)}</Text>,
-    <Text bold color={WHITE}>{cell(g.text, w - NUM - TIME)}</Text>,
+    <Text weight="semibold" color={WHITE}>
+      {cell(g.text, w - NUM - TIME)}
+    </Text>,
   ]
   const lines = viewLines(c, head, g.usage, marker(g.isOpen, g.count), scale).map((l, n) => (
-    <Button key={n === 0 ? g.key : `${g.key}:more`} plain onPress={press}>{l}</Button>
+    <Button key={n === 0 ? g.key : `${g.key}:more`} plain onPress={press}>
+      {l}
+    </Button>
   ))
-  const inner = g.isOpen ? conversationView({ ...c, width: c.width - 2, scale: rowScale }, g.rows, `${lead ?? ''}│ `) : []
+  const inner = g.isOpen
+    ? conversationView({ ...c, width: c.width - 2, scale: rowScale }, g.rows, `${lead ?? ''}│ `)
+    : []
   return (
     <Box key={`row:${g.key}`} flexDirection="column" backgroundColor={index % 2 === 1 ? STRIPE : undefined}>
-      {lead === null ? lines : lines.map((l) => (
-        <Box>
-          <Text dimColor>{lead}</Text>
-          {l}
-        </Box>
-      ))}
+      {lead === null
+        ? lines
+        : lines.map(l => (
+            <Box>
+              <Text dimColor>{lead}</Text>
+              {l}
+            </Box>
+          ))}
       {inner}
     </Box>
   )
@@ -275,16 +378,21 @@ function promptView(c: Ctx, g: PromptGroup, scale: number, rowScale: number, lea
 
 // The requests of a conversation under the prompts that started them; the requests alone when it has no prompts.
 function requestsView(
-  c: Ctx, conv: Conversation, p: PaneProps, prefix: string, range: [number, number] | undefined,
-  isLastOpen: boolean, lead: string | null,
+  c: Ctx,
+  conv: Conversation,
+  p: PaneProps,
+  prefix: string,
+  range: [number, number] | undefined,
+  isLastOpen: boolean,
+  lead: string | null,
 ): El[] {
-  const groups = promptGroups(conv, (k) => p.expanded[k], prefix, range, isLastOpen)
+  const groups = promptGroups(conv, k => p.expanded[k], prefix, range, isLastOpen)
   if (groups === null) {
-    const rows = conversationRows(conv, (k) => p.expanded[k] ?? false, prefix, range)
+    const rows = conversationRows(conv, k => p.expanded[k] ?? false, prefix, range)
     return conversationView({ ...c, scale: scaleOf(rows) }, rows, lead)
   }
-  const scale = Math.max(1, ...groups.map((g) => total(g.usage.tokens)))
-  const rowScale = scaleOf(groups.flatMap((g) => g.rows))
+  const scale = Math.max(1, ...groups.map(g => total(g.usage.tokens)))
+  const rowScale = scaleOf(groups.flatMap(g => g.rows))
   return groups.map((g, i) => promptView(c, g, scale, rowScale, lead, i))
 }
 
@@ -303,17 +411,28 @@ function conversationTab(c: Ctx, p: PaneProps): El[] {
 function groupLine(c: Ctx, n: Node, labelColor: string): El[] {
   const { Button, Text } = c.ui
   const label = n.isNow ? `${n.label}  now` : n.label
-  const head = (w: number) => [<Text bold color={labelColor}>{cell(label, w)}</Text>]
+  const head = (w: number) => [
+    <Text weight="semibold" color={labelColor}>
+      {cell(label, w)}
+    </Text>,
+  ]
   const lines = viewLines(c, head, n.usage, marker(n.isOpen, n.count), total(n.usage.tokens))
   return lines.map((l, i) => (
-    <Button key={i === 0 ? n.key : `${n.key}:more`} plain onPress={() => c.actions.toggle(n.key, n.isOpen)}>{l}</Button>
+    <Button
+      key={i === 0 ? n.key : `${n.key}:more`}
+      plain
+      onPress={() => {
+        c.actions.toggle(n.key, n.isOpen)
+      }}
+    >
+      {l}
+    </Button>
   ))
 }
 
 // A conversation on one row: its start time, its title and its totals. It opens to its prompts.
-function conversationNode(c: Ctx, n: Node, p: PaneProps, index: number): El {
+function conversationNode(c: Ctx, n: Node, id: string, p: PaneProps, index: number): El {
   const { Box, Button, Text } = c.ui
-  const id = n.conversationId!
   const detail = p.details[id]
   const press = () => {
     c.actions.toggle(n.key, n.isOpen)
@@ -326,7 +445,9 @@ function conversationNode(c: Ctx, n: Node, p: PaneProps, index: number): El {
     <Text color={WHITE}>{cell(n.label, w - TIME - continued.length)}</Text>,
   ]
   const lines = viewLines(c, head, n.usage, marker(n.isOpen, n.count), total(n.usage.tokens)).map((l, i) => (
-    <Button key={i === 0 ? n.key : `${n.key}:more`} plain onPress={press}>{l}</Button>
+    <Button key={i === 0 ? n.key : `${n.key}:more`} plain onPress={press}>
+      {l}
+    </Button>
   ))
   let inner: El[] = []
   if (n.isOpen) {
@@ -336,8 +457,12 @@ function conversationNode(c: Ctx, n: Node, p: PaneProps, index: number): El {
     }
   }
   return (
-    <Box key={`row:${n.key}`} flexDirection="column" backgroundColor={index % 2 === 1 ? STRIPE : undefined}
-      hover={c.isFullscreen ? HOVER : undefined}>
+    <Box
+      key={`row:${n.key}`}
+      flexDirection="column"
+      backgroundColor={index % 2 === 1 ? STRIPE : undefined}
+      hover={c.isFullscreen ? HOVER : undefined}
+    >
       {lines}
       {inner}
     </Box>
@@ -348,9 +473,9 @@ function conversationNode(c: Ctx, n: Node, p: PaneProps, index: number): El {
 // dashed line under it while it is open. Every level starts at the left edge.
 function nodeView(c: Ctx, n: Node, p: PaneProps, index: number): El {
   const { Box, Text } = c.ui
-  if (n.kind === 'conversation') return conversationNode(c, n, p, index)
+  if (n.kind === 'conversation' && n.conversationId !== null) return conversationNode(c, n, n.conversationId, p, index)
   const kids = n.isOpen ? n.children.map((k, i) => nodeView(c, k, p, i)) : []
-  const holdsGroups = n.children.some((k) => k.kind !== 'conversation')
+  const holdsGroups = n.children.some(k => k.kind !== 'conversation')
   if (holdsGroups) {
     return (
       <Box key={`group:${n.key}`} flexDirection="column">
@@ -390,9 +515,9 @@ function historyTab(c: Ctx, p: PaneProps): El[] {
 function pricesTab(c: Ctx, book: PriceBook): El[] {
   const { Box, Text } = c.ui
   const modelW = c.width - 5 * PRICE_COL
-  const names = ['input', 'write 5m', 'write 1h', 'read', 'output'].map((n) => rcell(n, PRICE_COL)).join('')
-  const listed = book.rows.filter((r) => r.since === book.since)
-  const lines: [string, Rates][] = listed.flatMap((r) => [
+  const names = ['input', 'write 5m', 'write 1h', 'read', 'output'].map(n => rcell(n, PRICE_COL)).join('')
+  const listed = book.rows.filter(r => r.since === book.since)
+  const lines: [string, Rates][] = listed.flatMap(r => [
     [r.model, r.rates] as [string, Rates],
     ...(r.longAbove !== null && r.longRates !== null
       ? [[`${r.model} >${r.longAbove.toLocaleString('en-US')}`, r.longRates] as [string, Rates]]
@@ -401,24 +526,35 @@ function pricesTab(c: Ctx, book: PriceBook): El[] {
   const rows = lines.map(([label, p], i) => (
     <Box key={`price:${label}`} backgroundColor={i % 2 === 1 ? STRIPE : undefined}>
       <Text color={WHITE}>{cell(label, modelW)}</Text>
-      {[p.input, p.cacheWrite5m, p.cacheWrite1h, p.cacheRead, p.output].map((v) => (
+      {[p.input, p.cacheWrite5m, p.cacheWrite1h, p.cacheRead, p.output].map(v => (
         <Text color={COLORS.cost}>{rcell(fmtPrice(v), PRICE_COL)}</Text>
       ))}
     </Box>
   ))
   const rule = <Text dimColor>{`${cell(dashes(modelW), modelW)}${rcell(dashes(PRICE_COL), PRICE_COL).repeat(5)}`}</Text>
-  const fast = listed.filter((r) => r.fastFactor !== null)
-  const long = listed.filter((r) => r.longAbove !== null && r.longRates !== null)
+  const fast = listed.flatMap(r => (r.fastFactor === null ? [] : [{ model: r.model, factor: r.fastFactor }]))
+  const long = listed.flatMap(r =>
+    r.longAbove === null || r.longRates === null ? [] : [{ model: r.model, above: r.longAbove }],
+  )
   const page = PRICING_URL.replace(/^https:\/\//, '').replace(/\.md$/, '')
-  const source = book.source === 'downloaded'
-    ? `Prices from ${page}, in effect since ${fmtDay(book.since)}, last checked ${fmtDay(book.checkedAt)}.`
-    : `Built-in prices, read from ${page} on ${fmtDay(book.checkedAt)}.`
+  const source =
+    book.source === 'downloaded'
+      ? `Prices from ${page}, in effect since ${fmtDay(book.since)}, last checked ${fmtDay(book.checkedAt)}.`
+      : `Built-in prices, read from ${page} on ${fmtDay(book.checkedAt)}.`
   const notes = [
     source,
     ...(book.error === null ? [] : [`The last download failed: ${book.error}`]),
-    ...[...new Set(fast.map((r) => r.fastFactor!))].map((factor) =>
-      `Fast mode on ${fast.filter((r) => r.fastFactor === factor).map((r) => r.model).join(', ')}: every price x ${factor}.`),
-    ...long.map((r) => `${r.model} with more than ${r.longAbove!.toLocaleString('en-US')} prompt tokens in one request: the prices of its > row.`),
+    ...[...new Set(fast.map(r => r.factor))].map(
+      factor =>
+        `Fast mode on ${fast
+          .filter(r => r.factor === factor)
+          .map(r => r.model)
+          .join(', ')}: every price x ${factor}.`,
+    ),
+    ...long.map(
+      r =>
+        `${r.model} with more than ${r.above.toLocaleString('en-US')} prompt tokens in one request: the prices of its > row.`,
+    ),
     'Each request is priced with the list in effect when it ran. A model id prices only under its exact name, with or without a date; any other model has no cost, shown as ?.',
   ]
   return [
@@ -426,25 +562,43 @@ function pricesTab(c: Ctx, book: PriceBook): El[] {
     rule,
     ...rows,
     rule,
-    ...notes.map((note) => (
+    ...notes.map(note => (
       <Box key={note}>
         <Text dimColor>{'• '}</Text>
-        <Box width={c.width - 2}><Text dimColor wrap="wrap">{note}</Text></Box>
+        <Box width={c.width - 2}>
+          <Text dimColor wrap="wrap">
+            {note}
+          </Text>
+        </Box>
       </Box>
     )),
   ]
 }
 
 // A row of switch choices: the current one is bold and inverse; `key` presses the next one.
-function switchView<T extends string>(c: Ctx, id: string, choices: [T, string][], current: T, select: (t: T) => void): El {
+function switchView<T extends string>(
+  c: Ctx,
+  id: string,
+  choices: [T, string][],
+  current: T,
+  select: (t: T) => void,
+): El {
   const { Box, Button, Text } = c.ui
   return (
     <Box gap={1}>
       {choices.map(([value, label]) => (
-        <Button key={`${id}-${value}`} plain onPress={() => select(value)}>
-          {value === current
-            ? <Text bold color="inverseText" backgroundColor={ACCENT}>{` ${label} `}</Text>
-            : <Text dimColor>{` ${label} `}</Text>}
+        <Button
+          key={`${id}-${value}`}
+          plain
+          onPress={() => {
+            select(value)
+          }}
+        >
+          {value === current ? (
+            <Text weight="semibold" color="inverseText" backgroundColor={ACCENT}>{` ${label} `}</Text>
+          ) : (
+            <Text dimColor>{` ${label} `}</Text>
+          )}
         </Button>
       ))}
     </Box>
@@ -459,25 +613,39 @@ function footer(c: Ctx, p: PaneProps): El {
   const { Box, Button, Text } = c.ui
   const keys: [string, string, string, () => void][] = [
     ['tab-next', 't', 'Tab', c.actions.nextTab],
-    ...(p.tab === 'prices' ? [] : [['view-next', 'v', 'View', c.actions.nextView] as [string, string, string, () => void]]),
-    ...(p.tab === 'history' ? [['group-next', 'g', 'Group', c.actions.nextGrouping] as [string, string, string, () => void]] : []),
+    ...(p.tab === 'prices'
+      ? []
+      : [['view-next', 'v', 'View', c.actions.nextView] as [string, string, string, () => void]]),
+    ...(p.tab === 'history'
+      ? [['group-next', 'g', 'Group', c.actions.nextGrouping] as [string, string, string, () => void]]
+      : []),
     ['hide', 'h', 'Hide', c.actions.hide],
   ]
   const used = keys.reduce((n, [, hotkey, label]) => n + hotkey.length + label.length + 4, 0)
   const line = <Text dimColor>{'─'.repeat(p.width)}</Text>
   return (
-    <Box position="absolute" top={p.scroll.offset + p.scroll.bodyRows - footerRows(p.tab)} left={0} width={p.width} flexDirection="column">
-      {p.tab === 'prices' ? null : [
-        line,
-        <Box key="switches" width={p.width} justifyContent="space-between">
-          {switchView(c, 'view', VIEWS, p.view, c.actions.selectView)}
-          {p.tab === 'history' ? switchView(c, 'group', GROUPINGS, p.grouping, c.actions.selectGrouping) : null}
-        </Box>,
-      ]}
+    <Box
+      position="absolute"
+      top={p.scroll.offset + p.scroll.bodyRows - footerRows(p.tab)}
+      left={0}
+      width={p.width}
+      flexDirection="column"
+    >
+      {p.tab === 'prices'
+        ? null
+        : [
+            line,
+            <Box key="switches" width={p.width} justifyContent="space-between">
+              {switchView(c, 'view', VIEWS, p.view, c.actions.selectView)}
+              {p.tab === 'history' ? switchView(c, 'group', GROUPINGS, p.grouping, c.actions.selectGrouping) : null}
+            </Box>,
+          ]}
       {line}
       <Box>
         {keys.map(([key, hotkey, label, press]) => [
-          <Button key={key} plain hotkey={hotkey} dimColor onPress={press}>{label}</Button>,
+          <Button key={key} plain hotkey={hotkey} dimColor onPress={press}>
+            {label}
+          </Button>,
           <Text key={`${key}-gap`}>{'  '}</Text>,
         ])}
         <Text>{' '.repeat(Math.max(0, p.width - used))}</Text>
@@ -487,16 +655,24 @@ function footer(c: Ctx, p: PaneProps): El {
 }
 
 export function drawPane(ui: Ui, p: PaneProps, actions: Actions): El {
-  const { Box, Button, Text } = ui
+  const { Box, Text } = ui
   const c: Ctx = { ui, view: p.view, width: p.width, isFullscreen: p.isFullscreen, scale: 1, actions }
-  const tabs: [Tab, string][] = [['conversation', 'Conversation'], ['history', 'History'], ['prices', 'Prices']]
+  const tabs: [Tab, string][] = [
+    ['conversation', 'Conversation'],
+    ['history', 'History'],
+    ['prices', 'Prices'],
+  ]
   return (
     <Box flexDirection="column" width={p.width} minHeight={p.scroll.bodyRows} paddingBottom={footerRows(p.tab)}>
       <Text dimColor>{'─'.repeat(p.width)}</Text>
       {switchView(c, 'tab', tabs, p.tab, actions.selectTab)}
       <Text dimColor>{'─'.repeat(p.width)}</Text>
       {p.notice === null ? null : <Text dimColor>{p.notice}</Text>}
-      {p.tab === 'conversation' ? conversationTab(c, p) : p.tab === 'history' ? historyTab(c, p) : pricesTab(c, p.prices)}
+      {p.tab === 'conversation'
+        ? conversationTab(c, p)
+        : p.tab === 'history'
+          ? historyTab(c, p)
+          : pricesTab(c, p.prices)}
       {footer(c, p)}
     </Box>
   )

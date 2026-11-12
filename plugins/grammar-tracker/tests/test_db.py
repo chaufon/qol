@@ -1,11 +1,17 @@
 import sqlite3
 
 import pytest
-
-from lib.db import (ADDED_IN_2, ADDED_IN_6, ROMANCE_TEXTS_5, SPANISH_TEXTS_4, VERSION, WORD_CHOICE_1,
-                    NewerDatabaseError, active_types, all_types, connect, save_check, top_mistakes)
+from lib.db import (
+    VERSION,
+    NewerDatabaseError,
+    active_types,
+    all_types,
+    connect,
+    save_check,
+    top_mistakes,
+)
+from lib.mistake_types import ADDED_IN_2, ADDED_IN_6, ROMANCE_TEXTS_5, SPANISH_TEXTS_4, WORD_CHOICE_1
 from lib.transcript import Check, Mistake
-
 
 OLD_SCHEMA = """
 CREATE TABLE IF NOT EXISTS prompts (
@@ -34,9 +40,26 @@ CREATE TABLE IF NOT EXISTS occurrences (
 CREATE INDEX IF NOT EXISTS occurrences_mistake ON occurrences (mistake_id);
 """
 
-SEED_KEYS = ["spelling", "irregular_verb", "phrasal_verb", "wrong_tense", "malformed_tense", "word_order",
-             "native_expression", "preposition", "article", "agreement", "word_choice", "false_friend", "countability",
-             "missing_subject", "verb_pattern", "question_form", "pronoun", "other"]
+SEED_KEYS = [
+    "spelling",
+    "irregular_verb",
+    "phrasal_verb",
+    "wrong_tense",
+    "malformed_tense",
+    "word_order",
+    "native_expression",
+    "preposition",
+    "article",
+    "agreement",
+    "word_choice",
+    "false_friend",
+    "countability",
+    "missing_subject",
+    "verb_pattern",
+    "question_form",
+    "pronoun",
+    "other",
+]
 
 
 def old_database(path, mistakes, occurrences, prompts=2):
@@ -44,12 +67,17 @@ def old_database(path, mistakes, occurrences, prompts=2):
     old = sqlite3.connect(path)
     old.executescript(OLD_SCHEMA)
     for i in range(1, prompts + 1):
-        old.execute("INSERT INTO prompts (prompt_uuid, session_id, created_at, project_dir, input_mode, original,"
-                    " corrected) VALUES (?, 's', '2026-10-17T12:00:00Z', '/p', 'typed', ?, ?)",
-                    (f"u{i}", f"original{i}", f"corrected{i}"))
+        old.execute(
+            "INSERT INTO prompts (prompt_uuid, session_id, created_at, project_dir, input_mode, original,"
+            " corrected) VALUES (?, 's', '2026-10-17T12:00:00Z', '/p', 'typed', ?, ?)",
+            (f"u{i}", f"original{i}", f"corrected{i}"),
+        )
     old.executemany("INSERT INTO mistakes (id, type, identifier) VALUES (?, ?, ?)", mistakes)
-    old.executemany("INSERT INTO occurrences (prompt_id, mistake_id, original_sentence, corrected_sentence)"
-                    " VALUES (?, ?, 'o', 'c')", occurrences)
+    old.executemany(
+        "INSERT INTO occurrences (prompt_id, mistake_id, original_sentence, corrected_sentence)"
+        " VALUES (?, ?, 'o', 'c')",
+        occurrences,
+    )
     old.commit()
     old.close()
 
@@ -63,8 +91,15 @@ def m(type_, identifier, n="", reason=None):
 
 
 def save(conn, turn, c):
-    return save_check(conn, turn_id=turn, session_id="s", created_at="2026-10-17T12:00:00Z",
-                      project_dir="/p", original="original", check=c)
+    return save_check(
+        conn,
+        turn_id=turn,
+        session_id="s",
+        created_at="2026-10-17T12:00:00Z",
+        project_dir="/p",
+        original="original",
+        check=c,
+    )
 
 
 def test_counts_every_occurrence_across_prompts(tmp_path):
@@ -95,8 +130,7 @@ def test_top_mistakes_ranks_by_count_with_latest_example(tmp_path):
     save(conn, "u1", check(m("article", "the", 1), m("spelling", "necessity", 2)))
     save(conn, "u2", check(m("article", "the", 3), m("preposition", "depend on", 4)))
     save(conn, "u3", check(m("preposition", "depend on", 5), m("article", "the", 6)))
-    assert [(o.type, o.type_label, o.identifier, o.original, o.corrected, o.count)
-            for o in top_mistakes(conn, 2)] == [
+    assert [(o.type, o.type_label, o.identifier, o.original, o.corrected, o.count) for o in top_mistakes(conn, 2)] == [
         ("article", "article", "the", "orig6", "fix6", 3),
         ("preposition", "preposition", "depend on", "orig5", "fix5", 2),
     ]
@@ -108,7 +142,9 @@ def test_reason_is_saved_and_reported_with_the_latest_example(tmp_path):
     assert [o.reason for o in saved] == ["a known remote", None]
     save(conn, "u2", check(m("article", "the", 3, "one specific file")))
     assert [(o.identifier, o.reason) for o in top_mistakes(conn, 10)] == [
-        ("the", "one specific file"), ("necessity", None)]
+        ("the", "one specific file"),
+        ("necessity", None),
+    ]
 
 
 def test_top_mistakes_empty_database(tmp_path):
@@ -133,8 +169,11 @@ def test_new_database_has_seed_types_at_version(tmp_path):
 def test_migration_keeps_every_saved_row(tmp_path):
     path = tmp_path / "g.db"
     old_database(path, [(1, "article", "the"), (2, "spelling", "necessity")], [(1, 1), (1, 2), (2, 1)])
-    queries = ["SELECT id, prompt_uuid, session_id, created_at, project_dir, input_mode, original, corrected FROM prompts", "SELECT id, type, identifier FROM mistakes",
-               "SELECT id, prompt_id, mistake_id, original_sentence, corrected_sentence FROM occurrences"]
+    queries = [
+        "SELECT id, prompt_uuid, session_id, created_at, project_dir, input_mode, original, corrected FROM prompts",
+        "SELECT id, type, identifier FROM mistakes",
+        "SELECT id, prompt_id, mistake_id, original_sentence, corrected_sentence FROM occurrences",
+    ]
     old = sqlite3.connect(path)
     before = [old.execute(q).fetchall() for q in queries]
     old.close()
@@ -169,8 +208,10 @@ def version_1_database(path, word_choice=WORD_CHOICE_1):
     conn = version_2_database(path)
     conn.execute(f"DELETE FROM mistake_types WHERE key IN {ADDED_IN_2 + ADDED_IN_6}")
     conn.execute("UPDATE mistake_types SET position = 12 WHERE key = 'other'")
-    conn.execute("UPDATE mistake_types SET description = ?, example = ?, identifier_rule = ? WHERE key = 'word_choice'",
-                 word_choice)
+    conn.execute(
+        "UPDATE mistake_types SET description = ?, example = ?, identifier_rule = ? WHERE key = 'word_choice'",
+        word_choice,
+    )
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
     conn.close()
@@ -182,7 +223,8 @@ def test_migration_from_2_adds_reason(tmp_path):
     assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
     assert conn.execute("SELECT original_sentence, reason FROM occurrences").fetchall() == [("orig", None)]
     assert [o.reason for o in save(conn, "u2", check(m("article", "the", reason="a known remote")))] == [
-        "a known remote"]
+        "a known remote"
+    ]
 
 
 def test_migration_from_1_adds_types_before_other(tmp_path):
@@ -201,7 +243,9 @@ def test_migration_from_1_keeps_edited_word_choice(tmp_path):
     version_1_database(tmp_path / "g.db", ("mine", *WORD_CHOICE_1[1:]))
     conn = connect(tmp_path / "g.db")
     assert conn.execute("SELECT description, example FROM mistake_types WHERE key = 'word_choice'").fetchone() == (
-        "mine", WORD_CHOICE_1[1])
+        "mine",
+        WORD_CHOICE_1[1],
+    )
 
 
 def test_connect_twice_changes_nothing(tmp_path):
@@ -255,7 +299,10 @@ def test_deleted_type_keeps_its_label_on_saved_mistakes(tmp_path):
     delete_type(conn, "phrasal_verb")
     top = top_mistakes(conn, 10)[0]
     assert (top.type, top.type_label, top.type_description) == (
-        "phrasal_verb", "phrasal verb", "The wrong verb + particle combination for the meaning.")
+        "phrasal_verb",
+        "phrasal verb",
+        "The wrong verb + particle combination for the meaning.",
+    )
 
 
 def test_migrated_database_connects_while_another_connection_holds_the_write_lock(tmp_path):
@@ -299,12 +346,16 @@ def version_3_database(path):
     conn = connect(path)
     save(conn, "t1", check(m("article", "the", 1)))
     conn.execute("PRAGMA foreign_keys = OFF")
-    conn.execute("CREATE TABLE prompts_3 (id INTEGER PRIMARY KEY, prompt_uuid TEXT NOT NULL UNIQUE, session_id TEXT,"
-                 " created_at TEXT NOT NULL, project_dir TEXT,"
-                 " input_mode TEXT CHECK (input_mode IN ('typed', 'dictated')), original TEXT NOT NULL,"
-                 " corrected TEXT NOT NULL)")
-    conn.execute("INSERT INTO prompts_3 SELECT id, 'u1', session_id, created_at, project_dir, input_mode, original,"
-                 " corrected FROM prompts")
+    conn.execute(
+        "CREATE TABLE prompts_3 (id INTEGER PRIMARY KEY, prompt_uuid TEXT NOT NULL UNIQUE, session_id TEXT,"
+        " created_at TEXT NOT NULL, project_dir TEXT,"
+        " input_mode TEXT CHECK (input_mode IN ('typed', 'dictated')), original TEXT NOT NULL,"
+        " corrected TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO prompts_3 SELECT id, 'u1', session_id, created_at, project_dir, input_mode, original,"
+        " corrected FROM prompts"
+    )
     conn.execute("DROP TABLE prompts")
     conn.execute("ALTER TABLE prompts_3 RENAME TO prompts")
     conn.execute("PRAGMA user_version = 3")
@@ -317,7 +368,8 @@ def test_migration_from_3_adds_turn_id_and_keeps_prompts_linked(tmp_path):
     conn = connect(tmp_path / "g.db")
     assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
     assert conn.execute("SELECT id, turn_id, prompt_uuid, original FROM prompts").fetchall() == [
-        (1, None, "u1", "original")]
+        (1, None, "u1", "original")
+    ]
     assert conn.execute("SELECT prompt_id FROM occurrences").fetchall() == [(1,)]
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     assert len(top_mistakes(conn, 10)) == 1
@@ -330,7 +382,10 @@ def test_migration_from_3_allows_prompts_without_uuid_and_dedupes_by_turn(tmp_pa
     assert save(conn, "t3", check()) == []
     assert save(conn, "t2", check(m("article", "the", 2))) is None
     assert conn.execute("SELECT turn_id, prompt_uuid FROM prompts ORDER BY id").fetchall() == [
-        (None, "u1"), ("t2", None), ("t3", None)]
+        (None, "u1"),
+        ("t2", None),
+        ("t3", None),
+    ]
 
 
 def test_new_database_names_no_language_in_its_types(tmp_path):
@@ -343,8 +398,10 @@ def version_4_database(path, edited=None):
     with a description of its own."""
     conn = connect(path)
     for key, (description, identifier_rule) in SPANISH_TEXTS_4.items():
-        conn.execute("UPDATE mistake_types SET description = ?, identifier_rule = ? WHERE key = ?",
-                     (description if key != edited else "mine", identifier_rule, key))
+        conn.execute(
+            "UPDATE mistake_types SET description = ?, identifier_rule = ? WHERE key = ?",
+            (description if key != edited else "mine", identifier_rule, key),
+        )
     conn.execute("PRAGMA user_version = 4")
     conn.commit()
     conn.close()
@@ -355,12 +412,15 @@ def test_migration_from_4_removes_spanish_from_the_types(tmp_path):
     conn = connect(tmp_path / "g.db")
     assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
     types = {t.key: t for t in all_types(conn)}
-    assert types["word_order"].description == ("Words in the order your native language uses instead of the order "
-                                               "English uses.")
-    assert types["word_order"].identifier_rule.startswith("the pattern the user was replicating from their native "
-                                                          "language")
-    assert types["false_friend"].description == ("An English word that looks like a word of your native language "
-                                                 "but means something else.")
+    assert types["word_order"].description == (
+        "Words in the order your native language uses instead of the order English uses."
+    )
+    assert types["word_order"].identifier_rule.startswith(
+        "the pattern the user was replicating from their native language"
+    )
+    assert types["false_friend"].description == (
+        "An English word that looks like a word of your native language but means something else."
+    )
     assert types["missing_subject"].description == "A clause without its subject, which English always needs."
 
 
@@ -373,10 +433,12 @@ def test_migration_from_4_keeps_an_edited_type(tmp_path):
 
 def test_new_database_covers_romance_mistakes(tmp_path):
     types = {t.key: t for t in all_types(connect(tmp_path / "g.db"))}
-    assert types["malformed_tense"].description == ("The right tense built wrong: auxiliaries wrong, missing, extra or "
-                                                    "in the wrong place.")
-    assert types["agreement"].description == ("A verb, noun or adjective that does not match its subject or its "
-                                              "number.")
+    assert types["malformed_tense"].description == (
+        "The right tense built wrong: auxiliaries wrong, missing, extra or in the wrong place."
+    )
+    assert types["agreement"].description == (
+        "A verb, noun or adjective that does not match its subject or its number."
+    )
     assert '"adjectives take no plural"' in types["agreement"].identifier_rule
     assert '"it for things"' in types["pronoun"].identifier_rule
 
@@ -388,8 +450,10 @@ def version_5_database(path, edited=None):
     conn.execute(f"DELETE FROM mistake_types WHERE key IN ({', '.join('?' * len(ADDED_IN_6))})", ADDED_IN_6)
     conn.execute("UPDATE mistake_types SET position = position - ? WHERE key = 'other'", (len(ADDED_IN_6),))
     for key, (description, identifier_rule) in ROMANCE_TEXTS_5.items():
-        conn.execute("UPDATE mistake_types SET description = ?, identifier_rule = ? WHERE key = ?",
-                     (description if key != edited else "mine", identifier_rule, key))
+        conn.execute(
+            "UPDATE mistake_types SET description = ?, identifier_rule = ? WHERE key = ?",
+            (description if key != edited else "mine", identifier_rule, key),
+        )
     conn.execute("PRAGMA user_version = 5")
     conn.commit()
     conn.close()
