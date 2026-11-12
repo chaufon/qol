@@ -153,13 +153,14 @@ export function mistakeColumn(paneWidth: number, largest: number): number {
 const TYPE_ICONS: Record<string, string> = {
   spelling: '✎', irregular_verb: '↯', phrasal_verb: '⇢', wrong_tense: '◷', malformed_tense: '◴', word_order: '⇅',
   native_expression: '❝', preposition: '⇄', article: 'ª', agreement: '≡', word_choice: '≈', false_friend: '⚑',
-  countability: '#', missing_subject: '∅', verb_pattern: '→', question_form: '?', other: '•',
+  countability: '#', missing_subject: '∅', verb_pattern: '→', question_form: '?', pronoun: '¶', other: '•',
 }
 const TYPE_COLORS: Record<string, string> = {
   spelling: 'error', irregular_verb: 'remember', phrasal_verb: 'permission', wrong_tense: 'ide',
   malformed_tense: 'ide', word_order: 'autoAccept', native_expression: 'claude', preposition: 'suggestion',
   article: 'error', agreement: 'merged', word_choice: 'remember', false_friend: 'warning', countability: 'planMode',
-  missing_subject: 'warning', verb_pattern: 'permission', question_form: 'suggestion', other: 'inactive',
+  missing_subject: 'warning', verb_pattern: 'permission', question_form: 'suggestion', pronoun: 'claude',
+  other: 'inactive',
 }
 
 export function typeIcon(type: string): string {

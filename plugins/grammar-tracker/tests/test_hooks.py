@@ -30,7 +30,7 @@ def test_prompt_context_adds_instruction(tmp_path):
                                                          "malformed_tense", "word_order", "native_expression",
                                                          "preposition", "article", "agreement", "word_choice",
                                                          "false_friend", "countability", "missing_subject",
-                                                         "verb_pattern", "question_form", "other")]
+                                                         "verb_pattern", "question_form", "pronoun", "other")]
     assert positions == sorted(positions)
 
 

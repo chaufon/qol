@@ -690,6 +690,8 @@ test('meter, barFill, sparkline and cleanStreak scale a count', () => {
 
 test('every mistake type has an icon and a color, and an unknown type uses the "other" ones', () => {
   expect(typeIcon('article')).toBe('ª')
+  expect(typeIcon('pronoun')).not.toBe(typeIcon('other'))
+  expect(typeColor('pronoun')).not.toBe(typeColor('other'))
   expect(typeIcon('nope')).toBe(typeIcon('other'))
   expect(typeColor('nope')).toBe(typeColor('other'))
 })

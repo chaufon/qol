@@ -58,9 +58,10 @@ SEED = (
      '"simple past" instead of "present perfect"',
      'the used tense and the correct one, as is ("\\"simple past\\" instead of \\"present perfect\\"")'),
     ("malformed_tense", "malformed tense",
-     "The right tense built wrong: auxiliaries missing, extra or in the wrong place.",
+     "The right tense built wrong: auxiliaries wrong, missing, extra or in the wrong place.",
      '"you have been at the mall?" instead of "have you been at the mall?"',
-     'the auxiliaries in correct order ("have you been" for "you have been at the mall?")'),
+     'the correct auxiliaries in correct order ("have you been" for "you have been at the mall?", "have arrived" for '
+     '"I am arrived")'),
     ("word_order", "word order", "Words in the order your native language uses instead of the order English uses.",
      '"the strategy of my cousin" instead of "my cousin\'s strategy"',
      'the pattern the user was replicating from their native language ("expressing belonging" for "the strategy of '
@@ -74,9 +75,10 @@ SEED = (
     ("article", "article", 'A wrong, missing or extra "a/an" or "the".',
      '"the people are selfish" instead of "people are selfish"',
      'the correct article use: "a/an", "the" or "no article" ("no article" for "the people are selfish")'),
-    ("agreement", "agreement", "A verb or noun that does not match its subject or its number.",
+    ("agreement", "agreement", "A verb, noun or adjective that does not match its subject or its number.",
      '"he have" instead of "he has"',
-     'the agreement rule: "third person -s", "there is/there are", "plural noun", ...'),
+     'the agreement rule: "third person -s", "there is/there are", "plural noun", "adjectives take no plural" '
+     '("different" for "differents options"), ...'),
     ("word_choice", "word choice", "A real English word that does not mean what you meant.",
      '"button" instead of "key"',
      'the correct word ("key" for "press the G button")'),
@@ -99,10 +101,16 @@ SEED = (
      '"tell me what is it" instead of "tell me what it is"',
      'the rule broken: "no inversion in a direct question", "question order in an indirect question", '
      '"missing do/does/did" or "missing if/whether"'),
+    ("pronoun", "pronoun",
+     "A wrong pronoun or possessive: he or she for a thing, a possessive that agrees with the thing owned instead of "
+     "the owner, or a subject pronoun where an object pronoun belongs, or the reverse.",
+     '"my sister and his husband" instead of "my sister and her husband"',
+     'the rule broken: "it for things" ("she returns" for a function), "possessive follows the owner" ("his husband" '
+     'for my sister\'s husband), "subject pronoun" ("me and my team will"), "object pronoun" ("between you and I"), ...'),
     ("other", "other", "Any mistake that fits none of the types above.", None,
      "a short description of the mistake"),
 )
-VERSION = 5
+VERSION = 6
 # Types that version 2 adds, and the word_choice text of version 1 that version 2 rewrites.
 ADDED_IN_2 = ("false_friend", "countability", "missing_subject", "verb_pattern", "question_form")
 WORD_CHOICE_1 = ("A real English word that does not mean what you meant, false friends included.",
@@ -119,6 +127,16 @@ SPANISH_TEXTS_4 = {
                      'meant as "currently")'),
     "missing_subject": ('A clause without its subject, as Spanish allows ("es importante").',
                         'the missing subject ("it" for "is important to test")'),
+}
+
+# The type that version 6 adds, and the (description, identifier_rule) of each type that version 6 rewrites to cover
+# mistakes of Romance-language speakers, as they are up to version 5.
+ADDED_IN_6 = ("pronoun",)
+ROMANCE_TEXTS_5 = {
+    "malformed_tense": ("The right tense built wrong: auxiliaries missing, extra or in the wrong place.",
+                        'the auxiliaries in correct order ("have you been" for "you have been at the mall?")'),
+    "agreement": ("A verb or noun that does not match its subject or its number.",
+                  'the agreement rule: "third person -s", "there is/there are", "plural noun", ...'),
 }
 
 
@@ -191,6 +209,8 @@ def _migrate(conn):
         _add_reason(conn)
         _add_turn_id(conn)
         _remove_spanish(conn)
+        if version <= 5:
+            _cover_romance(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchall():
             raise sqlite3.IntegrityError("foreign key check failed after migration")
         conn.execute(f"PRAGMA user_version = {VERSION}")
@@ -226,23 +246,40 @@ def _create(conn):
 def _add_types_of_2(conn):
     """Add the version 2 types after the last type that is not 'other', and keep 'other' last. word_choice gets its
     version 2 text only while it still has the version 1 text, so edits stay."""
-    (last,) = conn.execute("SELECT MAX(position) FROM mistake_types WHERE key != 'other'").fetchone()
-    rows = [row for row in SEED if row[0] in ADDED_IN_2]
-    conn.executemany("INSERT OR IGNORE INTO mistake_types (key, label, description, example, identifier_rule,"
-                     " position) VALUES (?, ?, ?, ?, ?, ?)", [(*row, last + i) for i, row in enumerate(rows, 1)])
-    conn.execute("UPDATE mistake_types SET position = ? WHERE key = 'other'", (last + len(rows) + 1,))
+    _add_before_other(conn, ADDED_IN_2)
     word_choice = next(row for row in SEED if row[0] == "word_choice")
     conn.execute("UPDATE mistake_types SET description = ?, example = ?, identifier_rule = ?"
                  " WHERE key = 'word_choice' AND description = ? AND example = ? AND identifier_rule = ?",
                  (*word_choice[2:], *WORD_CHOICE_1))
 
-def _remove_spanish(conn):
-    """Give the types of SPANISH_TEXTS_4 their version 5 text, which names no language. A type gets it only while it
-    still has its version 4 text, so edits stay."""
+def _add_before_other(conn, keys):
+    """Add the SEED types of `keys` after the last type that is not 'other', and keep 'other' last."""
+    (last,) = conn.execute("SELECT MAX(position) FROM mistake_types WHERE key != 'other'").fetchone()
+    rows = [row for row in SEED if row[0] in keys]
+    conn.executemany("INSERT OR IGNORE INTO mistake_types (key, label, description, example, identifier_rule,"
+                     " position) VALUES (?, ?, ?, ?, ?, ?)", [(*row, last + i) for i, row in enumerate(rows, 1)])
+    conn.execute("UPDATE mistake_types SET position = ? WHERE key = 'other'", (last + len(rows) + 1,))
+
+
+def _rewrite_unedited(conn, old_texts):
+    """Give each type of `old_texts` its SEED description and identifier rule, only while it still has the old text
+    that `old_texts` maps it to, so edits stay."""
     seed = {row[0]: row for row in SEED}
     conn.executemany("UPDATE mistake_types SET description = ?, identifier_rule = ?"
                      " WHERE key = ? AND description = ? AND identifier_rule = ?",
-                     [(seed[key][2], seed[key][4], key, *old) for key, old in SPANISH_TEXTS_4.items()])
+                     [(seed[key][2], seed[key][4], key, *old) for key, old in old_texts.items()])
+
+
+def _cover_romance(conn):
+    """Add the version 6 types before 'other' and give the types of ROMANCE_TEXTS_5 their version 6 text."""
+    _add_before_other(conn, ADDED_IN_6)
+    _rewrite_unedited(conn, ROMANCE_TEXTS_5)
+
+
+def _remove_spanish(conn):
+    """Give the types of SPANISH_TEXTS_4 their version 5 text, which names no language. A type gets it only while it
+    still has its version 4 text, so edits stay."""
+    _rewrite_unedited(conn, SPANISH_TEXTS_4)
 
 
 def _add_reason(conn):

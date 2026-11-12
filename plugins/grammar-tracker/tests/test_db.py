@@ -2,8 +2,8 @@ import sqlite3
 
 import pytest
 
-from lib.db import (ADDED_IN_2, SPANISH_TEXTS_4, VERSION, WORD_CHOICE_1, NewerDatabaseError, active_types, all_types, connect,
-                    save_check, top_mistakes)
+from lib.db import (ADDED_IN_2, ADDED_IN_6, ROMANCE_TEXTS_5, SPANISH_TEXTS_4, VERSION, WORD_CHOICE_1,
+                    NewerDatabaseError, active_types, all_types, connect, save_check, top_mistakes)
 from lib.transcript import Check, Mistake
 
 
@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS occurrences_mistake ON occurrences (mistake_id);
 
 SEED_KEYS = ["spelling", "irregular_verb", "phrasal_verb", "wrong_tense", "malformed_tense", "word_order",
              "native_expression", "preposition", "article", "agreement", "word_choice", "false_friend", "countability",
-             "missing_subject", "verb_pattern", "question_form", "other"]
+             "missing_subject", "verb_pattern", "question_form", "pronoun", "other"]
 
 
 def old_database(path, mistakes, occurrences, prompts=2):
@@ -167,7 +167,7 @@ def version_2_database(path):
 def version_1_database(path, word_choice=WORD_CHOICE_1):
     """Build a version 1 database: the version 1 types, 'other' at position 12, and one saved word_choice mistake."""
     conn = version_2_database(path)
-    conn.execute(f"DELETE FROM mistake_types WHERE key IN {ADDED_IN_2}")
+    conn.execute(f"DELETE FROM mistake_types WHERE key IN {ADDED_IN_2 + ADDED_IN_6}")
     conn.execute("UPDATE mistake_types SET position = 12 WHERE key = 'other'")
     conn.execute("UPDATE mistake_types SET description = ?, example = ?, identifier_rule = ? WHERE key = 'word_choice'",
                  word_choice)
@@ -190,7 +190,7 @@ def test_migration_from_1_adds_types_before_other(tmp_path):
     conn = connect(tmp_path / "g.db")
     types = all_types(conn)
     assert [t.key for t in types] == SEED_KEYS
-    assert [t.position for t in types] == list(range(1, 18))
+    assert [t.position for t in types] == list(range(1, len(SEED_KEYS) + 1))
     assert types[10].description == "A real English word that does not mean what you meant."
     assert conn.execute("SELECT type, identifier FROM mistakes").fetchall() == [("word_choice", "currently")]
     assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
@@ -207,14 +207,14 @@ def test_migration_from_1_keeps_edited_word_choice(tmp_path):
 def test_connect_twice_changes_nothing(tmp_path):
     connect(tmp_path / "g.db").close()
     conn = connect(tmp_path / "g.db")
-    assert len(all_types(conn)) == 17
+    assert len(all_types(conn)) == len(SEED_KEYS)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
 
 
 def test_connect_on_migrated_database_from_second_connection_changes_nothing(tmp_path):
     first = connect(tmp_path / "g.db")
     second = connect(tmp_path / "g.db")
-    assert len(all_types(first)) == len(all_types(second)) == 17
+    assert len(all_types(first)) == len(all_types(second)) == len(SEED_KEYS)
 
 
 def test_connect_enables_foreign_keys(tmp_path):
@@ -263,7 +263,7 @@ def test_migrated_database_connects_while_another_connection_holds_the_write_loc
     writer = sqlite3.connect(tmp_path / "g.db", isolation_level=None)
     writer.execute("BEGIN IMMEDIATE")
     try:
-        assert len(all_types(connect(tmp_path / "g.db"))) == 17
+        assert len(all_types(connect(tmp_path / "g.db"))) == len(SEED_KEYS)
     finally:
         writer.execute("ROLLBACK")
 
@@ -369,3 +369,46 @@ def test_migration_from_4_keeps_an_edited_type(tmp_path):
     types = {t.key: t for t in all_types(connect(tmp_path / "g.db"))}
     assert types["false_friend"].description == "mine"
     assert types["missing_subject"].description == "A clause without its subject, which English always needs."
+
+
+def test_new_database_covers_romance_mistakes(tmp_path):
+    types = {t.key: t for t in all_types(connect(tmp_path / "g.db"))}
+    assert types["malformed_tense"].description == ("The right tense built wrong: auxiliaries wrong, missing, extra or "
+                                                    "in the wrong place.")
+    assert types["agreement"].description == ("A verb, noun or adjective that does not match its subject or its "
+                                              "number.")
+    assert '"adjectives take no plural"' in types["agreement"].identifier_rule
+    assert '"it for things"' in types["pronoun"].identifier_rule
+
+
+def version_5_database(path, edited=None):
+    """Build a version 5 database: no pronoun type, the types of ROMANCE_TEXTS_5 with their version 5 text, and
+    `edited`, when given, with a description of its own."""
+    conn = connect(path)
+    conn.execute(f"DELETE FROM mistake_types WHERE key IN ({', '.join('?' * len(ADDED_IN_6))})", ADDED_IN_6)
+    conn.execute("UPDATE mistake_types SET position = position - ? WHERE key = 'other'", (len(ADDED_IN_6),))
+    for key, (description, identifier_rule) in ROMANCE_TEXTS_5.items():
+        conn.execute("UPDATE mistake_types SET description = ?, identifier_rule = ? WHERE key = ?",
+                     (description if key != edited else "mine", identifier_rule, key))
+    conn.execute("PRAGMA user_version = 5")
+    conn.commit()
+    conn.close()
+
+
+def test_migration_from_5_adds_pronoun_before_other_and_rewrites_types(tmp_path):
+    version_5_database(tmp_path / "g.db")
+    conn = connect(tmp_path / "g.db")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
+    types = all_types(conn)
+    assert [t.key for t in types] == SEED_KEYS
+    assert [t.position for t in types] == list(range(1, len(SEED_KEYS) + 1))
+    by_key = {t.key: t for t in types}
+    assert by_key["malformed_tense"].description.startswith("The right tense built wrong: auxiliaries wrong,")
+    assert by_key["agreement"].description.startswith("A verb, noun or adjective")
+
+
+def test_migration_from_5_keeps_an_edited_type(tmp_path):
+    version_5_database(tmp_path / "g.db", edited="agreement")
+    types = {t.key: t for t in all_types(connect(tmp_path / "g.db"))}
+    assert types["agreement"].description == "mine"
+    assert types["malformed_tense"].description.startswith("The right tense built wrong: auxiliaries wrong,")

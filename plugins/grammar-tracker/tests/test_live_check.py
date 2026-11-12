@@ -47,7 +47,8 @@ def sample(language: str, prompt: str, types: set[str], gone: str) -> Sample:
 
 
 SAMPLES = (
-    # French: present for an action that continues, "expliquer à quelqu'un", "assister à", "informations".
+    # French: present for an action that continues, "expliquer à quelqu'un", "assister à", "informations",
+    # "elle" for a feminine noun, plural adjectives.
     sample("French", "I am working on this project since two years, so I know the code well.",
            {"wrong_tense", "preposition"}, "since two years"),
     sample("French", "Can you explain me why the build fails on the main branch?",
@@ -55,7 +56,11 @@ SAMPLES = (
     sample("French", "I assisted to the meeting yesterday, and they asked me to fix the login page.",
            {"false_friend", "word_choice", "preposition"}, "assisted to"),
     sample("French", "The informations about the error are in the log file.", {"countability"}, "informations"),
-    # Portuguese: dropped subject, "pretender" (intend), "preciso que você", perfect for a finished past action.
+    sample("French", "The function is slow because she reads the whole file into memory.", {"pronoun"},
+           "because she reads"),
+    sample("French", "We tested differents options for the cache last week.", {"agreement"}, "differents"),
+    # Portuguese: dropped subject, "pretender" (intend), "preciso que você", perfect for a finished past action, "seu"
+    # agreeing with the thing owned.
     sample("Portuguese", "Is important to run the tests before we merge the branch.", {"missing_subject"},
            "Is important"),
     sample("Portuguese", "I pretend to finish the migration today, so please review it soon.",
@@ -63,12 +68,17 @@ SAMPLES = (
     sample("Portuguese", "I need that you push the changes to the remote repository.", {"verb_pattern"},
            "need that you"),
     sample("Portuguese", "Yesterday I have fixed the bug in the parser.", {"wrong_tense"}, "have fixed"),
-    # Italian: "voglio che tu", dropped subject, "controllare" (check), passato prossimo for a finished action.
+    sample("Portuguese", "My sister finished the review and pushed the fix to his own branch.", {"pronoun"},
+           "his own"),
+    # Italian: "voglio che tu", dropped subject, "controllare" (check), passato prossimo for a finished action,
+    # "essere" as the auxiliary.
     sample("Italian", "I want that you check the logs before the deploy.", {"verb_pattern"}, "want that you"),
     sample("Italian", "Is necessary to update the README after this change.", {"missing_subject"}, "Is necessary"),
     sample("Italian", "Please control the logs and tell me if there are errors.", {"false_friend", "word_choice"},
            "control the logs"),
     sample("Italian", "I have done the tests yesterday and they all passed.", {"wrong_tense"}, "have done"),
+    sample("Italian", "The new version is arrived on the server, so we can start the tests.", {"malformed_tense"},
+           "is arrived"),
     # Spanish: "depender de", "discutir sobre".
     sample("Spanish", "I depend of the API team to finish this feature.", {"preposition"}, "depend of"),
     sample("Spanish", "We need to discuss about the design before we write the code.", {"preposition"},
