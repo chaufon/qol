@@ -2,12 +2,17 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Grouping, Tab, View, WindowTotal } from '../types'
-import { loadConversation, loadHistory, loadWindows, loadWindowTotal, openDb, saveConversation, saveWindow } from './db'
+import {
+  loadConversation, loadHistory, loadPriceBook, loadWindows, loadWindowTotal, openDb, saveConversation, saveDownloadedPrices,
+  saveWindow,
+} from './db'
 import type { Db } from './db'
 import { drawPane } from './draw'
 import type { Actions } from './draw'
 import { fmtCost, fmtTokens } from './format'
 import { sumUsage } from './model'
+import { BUILT_IN_BOOK, PRICING_URL, usePriceBook } from './prices'
+import { parsePricingPage } from './pricing-page'
 import { newReader, readConversation } from './sync'
 import { currentWindows, observe } from './windows'
 
@@ -27,6 +32,12 @@ const history = atom({ plugin: 'conversation-usage', key: 'history' } as const, 
 const details = atom({ plugin: 'conversation-usage', key: 'details' } as const, {})
 const notice = atom({ plugin: 'conversation-usage', key: 'notice' } as const, null)
 const now = atom({ plugin: 'conversation-usage', key: 'now' } as const, 0)
+const prices = atom({ plugin: 'conversation-usage', key: 'prices' } as const, BUILT_IN_BOOK)
+const priceAttemptAt = atom({ plugin: 'conversation-usage', key: 'priceAttemptAt' } as const, null)
+
+// A downloaded price list is checked again once it is this old; a failed download is tried again after RETRY_MS.
+const CHECK_EVERY_MS = 24 * 3_600_000
+const RETRY_MS = 3_600_000
 
 const after = <T,>(list: T[], item: T): T => list[(list.indexOf(item) + 1) % list.length]!
 
@@ -65,6 +76,36 @@ async function loadDetailsAtom($: EngineInterface, id: string): Promise<void> {
   }
 }
 
+// Puts the stored prices in use, keeping the last download error.
+async function loadPrices($: EngineInterface, db: Db): Promise<void> {
+  const book = await loadPriceBook($, db)
+  const { error } = await read($, prices)
+  usePriceBook(book)
+  await update($, prices, () => ({ ...book, error }))
+}
+
+// Downloads the pricing page when the newest downloaded list is a day old or there is none, at most once an
+// hour. Skipped while CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set. Never rejects.
+async function downloadPrices($: EngineInterface, db: Db, t: number): Promise<void> {
+  const book = await read($, prices)
+  if (book.source === 'downloaded' && t - book.checkedAt < CHECK_EVERY_MS) return
+  const attempt = await read($, priceAttemptAt)
+  if (attempt !== null && t - attempt < RETRY_MS) return
+  if (await $.env.get('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')) return
+  await update($, priceAttemptAt, () => t)
+  let error: string | null = null
+  try {
+    const response = await $.http.fetch(PRICING_URL)
+    const parsed = response.ok ? parsePricingPage(response.text, t) : { error: `The pricing page answered ${response.status}` }
+    if ('error' in parsed) error = parsed.error
+    else await saveDownloadedPrices($, db, parsed, t)
+  } catch (e) {
+    error = oneLine(e)
+  }
+  await update($, prices, (b) => ({ ...b, error }))
+  await loadPrices($, db)
+}
+
 // Reads the conversation, stores it, and totals the live windows. Never rejects.
 async function refresh($: EngineInterface): Promise<void> {
   try {
@@ -82,7 +123,10 @@ async function refresh($: EngineInterface): Promise<void> {
       await update($, notice, () => db.error)
       return
     }
+    await loadPrices($, db)
     if (conversation !== null) await saveConversation($, db, conversation)
+    // Before the totals, so prices that changed reach them.
+    await downloadPrices($, db, t)
     const totals: WindowTotal[] = []
     for (const window of currentWindows(await loadWindows($, db), t)) {
       totals.push({ window, usage: await loadWindowTotal($, db, window) })
@@ -234,6 +278,7 @@ export const register: Register = (on) => {
         expanded: await read($, expanded),
         notice: await read($, notice),
         now: await read($, now),
+        prices: await read($, prices),
         isFullscreen: e.viewport?.isFullscreen === true,
         scroll: e.props.scroll,
       },

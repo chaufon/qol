@@ -1,32 +1,74 @@
-import type { Costs, Request, Tokens } from '../types'
+import type { Costs, PriceBook, PriceRow, Rates, Request, Tokens } from '../types'
 
-type Price = { input: number; cacheRead: number; output: number }
+// The official pricing page, as Markdown.
+export const PRICING_URL = 'https://platform.claude.com/docs/en/about-claude/pricing.md'
 
-// USD per million tokens. A cache write costs input x CACHE_WRITE_5M or x CACHE_WRITE_1H.
-export const PRICES: Record<string, Price> = {
-  'claude-fable-5-1': { input: 10, cacheRead: 0.25, output: 50 },
-  'claude-mythos-5-1': { input: 10, cacheRead: 0.25, output: 50 },
-  'claude-fable-5': { input: 10, cacheRead: 1, output: 50 },
-  'claude-mythos-5': { input: 10, cacheRead: 1, output: 50 },
-  'claude-opus-5-5': { input: 4, cacheRead: 0.2, output: 20 },
-  'claude-opus-5': { input: 5, cacheRead: 0.5, output: 25 },
-  'claude-opus-4-8': { input: 5, cacheRead: 0.5, output: 25 },
-  'claude-opus-4-7': { input: 5, cacheRead: 0.5, output: 25 },
-  'claude-opus-4-6': { input: 5, cacheRead: 0.5, output: 25 },
-  'claude-sonnet-5-5': { input: 2, cacheRead: 0.2, output: 10 },
-  'claude-sonnet-5': { input: 2, cacheRead: 0.2, output: 10 },
-  'claude-sonnet-4-6': { input: 3, cacheRead: 0.3, output: 15 },
-  'claude-haiku-5-5': { input: 0.1, cacheRead: 0.01, output: 0.5 },
-  'claude-haiku-4-5': { input: 1, cacheRead: 0.1, output: 5 },
+// When the built-in prices were read from the pricing page.
+export const BUILT_IN_CHECKED_AT = new Date(2026, 10, 11).getTime()
+
+const rates = (input: number, cacheWrite5m: number, cacheWrite1h: number, cacheRead: number, output: number): Rates =>
+  ({ input, cacheWrite5m, cacheWrite1h, cacheRead, output })
+
+const row = (model: string, r: Rates, extra: Partial<PriceRow> = {}): PriceRow =>
+  ({ since: 0, model, rates: r, fastFactor: null, longAbove: null, longRates: null, ...extra })
+
+// USD per million tokens, in the order of the pricing page. `since` 0: in effect for every request
+// older than the first downloaded list, and for every model no downloaded list names.
+export const BUILT_IN: PriceRow[] = [
+  row('claude-fable-5-2', rates(8, 10, 16, 0.2, 40), { fastFactor: 2 }),
+  row('claude-mythos-5-2', rates(8, 10, 16, 0.2, 40), { fastFactor: 2 }),
+  row('claude-fable-5-1', rates(10, 12.5, 20, 0.25, 50)),
+  row('claude-mythos-5-1', rates(10, 12.5, 20, 0.25, 50)),
+  row('claude-fable-5', rates(10, 12.5, 20, 1, 50)),
+  row('claude-mythos-5', rates(10, 12.5, 20, 1, 50)),
+  row('claude-opus-5-5', rates(4, 5, 8, 0.2, 20), { fastFactor: 2 }),
+  row('claude-opus-5', rates(5, 6.25, 10, 0.5, 25), { fastFactor: 2 }),
+  row('claude-opus-4-8', rates(5, 6.25, 10, 0.5, 25), { fastFactor: 2 }),
+  row('claude-opus-4-7', rates(5, 6.25, 10, 0.5, 25)),
+  row('claude-opus-4-6', rates(5, 6.25, 10, 0.5, 25)),
+  row('claude-opus-4-5', rates(5, 6.25, 10, 0.5, 25)),
+  row('claude-opus-4-1', rates(15, 18.75, 30, 1.5, 75)),
+  row('claude-opus-4', rates(15, 18.75, 30, 1.5, 75)),
+  row('claude-sonnet-5-5', rates(2, 2.5, 4, 0.1, 10)),
+  row('claude-sonnet-5', rates(2, 2.5, 4, 0.2, 10)),
+  row('claude-sonnet-4-6', rates(3, 3.75, 6, 0.3, 15)),
+  row('claude-sonnet-4-5', rates(3, 3.75, 6, 0.3, 15)),
+  row('claude-sonnet-4', rates(3, 3.75, 6, 0.3, 15)),
+  row('claude-haiku-5-5', rates(0.1, 0.125, 0.2, 0.01, 0.5), {
+    longAbove: 100_000, longRates: rates(0.5, 0.625, 1, 0.05, 2.5),
+  }),
+  row('claude-haiku-4-5', rates(1, 1.25, 2, 0.1, 5)),
+]
+
+export const BUILT_IN_BOOK: PriceBook = {
+  rows: BUILT_IN, source: 'built-in', checkedAt: BUILT_IN_CHECKED_AT, since: 0, error: null,
 }
 
-export const CACHE_WRITE_5M = 1.25
-export const CACHE_WRITE_1H = 2
-export const FAST_MODELS = ['claude-opus-5-5', 'claude-opus-5']
-export const LONG_CONTEXT_MODEL = 'claude-haiku-5-5'
-export const LONG_CONTEXT_TOKENS = 100_000
-export const LONG_CONTEXT_FACTOR = 5
-export const FAST_FACTOR = 2
+// The price key of a model id: the id without a trailing `[...]` tag (`[1m]`) and without a trailing
+// date (`-20261001` or `@20261001`). A model prices only under its exact key, so a new model or a new
+// version of one has no price until a price list names it.
+export const priceKey = (model: string): string => model.replace(/\[[^\]]*\]$/, '').replace(/[-@]\d{8}$/, '')
+
+// The row in effect for `model` at `at`: the newest row whose `since` is at or before `at`, else the
+// oldest row of that model. Null when no row names the model.
+export function rowFor(rows: PriceRow[], model: string, at: number): PriceRow | null {
+  const key = priceKey(model)
+  let before: PriceRow | null = null
+  let after: PriceRow | null = null
+  for (const r of rows) {
+    if (r.model !== key) continue
+    if (r.since <= at) {
+      if (before === null || r.since > before.since) before = r
+    } else if (after === null || r.since < after.since) after = r
+  }
+  return before ?? after
+}
+
+// The prices in use. register.tsx replaces them with the book stored in the database.
+let book: PriceBook = BUILT_IN_BOOK
+export const usePriceBook = (next: PriceBook): void => {
+  book = next
+}
 
 export const ZERO_TOKENS: Tokens = { input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 }
 
@@ -40,6 +82,9 @@ export const addTokens = (a: Tokens, b: Tokens): Tokens => ({
 
 export const totalTokens = (t: Tokens): number => t.input + t.cacheWrite5m + t.cacheWrite1h + t.cacheRead + t.output
 
+// Every input token of a request, cache reads and writes included: what a long-context threshold counts.
+export const promptTokens = (t: Tokens): number => t.input + t.cacheWrite5m + t.cacheWrite1h + t.cacheRead
+
 export const addCosts = (a: Costs | null, b: Costs | null): Costs | null => {
   if (!a) return b
   if (!b) return a
@@ -52,29 +97,26 @@ export const addCosts = (a: Costs | null, b: Costs | null): Costs | null => {
   }
 }
 
-// The table key the model id starts with, longest first; null when none matches.
-const keyOf = (model: string): string | null => {
-  let best: string | null = null
-  for (const key of Object.keys(PRICES)) {
-    if (model.startsWith(key) && (best === null || key.length > best.length)) best = key
-  }
-  return best
+// The cost of one request at the prices in effect when it ran; null when no price list names its model.
+// The same rule as `repriceRequests` in sql.ts, which prices the stored requests.
+export function costOf(r: Pick<Request, 'model' | 'tokens' | 'isFast' | 'at'>, rows: PriceRow[] = book.rows): Costs | null {
+  const price = rowFor(rows, r.model, r.at)
+  if (price === null) return null
+  const t = r.tokens
+  const isLong = price.longAbove !== null && price.longRates !== null && promptTokens(t) > price.longAbove
+  const p = isLong ? price.longRates! : price.rates
+  const factor = r.isFast && price.fastFactor !== null ? price.fastFactor : 1
+  const per = (rate: number) => (rate * factor) / 1e6
+  const input = t.input * per(p.input)
+  const cacheWrite = t.cacheWrite5m * per(p.cacheWrite5m) + t.cacheWrite1h * per(p.cacheWrite1h)
+  const cacheRead = t.cacheRead * per(p.cacheRead)
+  const output = t.output * per(p.output)
+  return { input, cacheWrite, cacheRead, output, total: input + cacheWrite + cacheRead + output }
 }
 
-export const costOf = (r: Pick<Request, 'model' | 'tokens' | 'isFast'>): Costs | null => {
-  const key = keyOf(r.model)
-  if (key === null) return null
-  const price = PRICES[key]!
-  const t = r.tokens
-  let factor = 1
-  if (key === LONG_CONTEXT_MODEL && t.input + t.cacheWrite5m + t.cacheWrite1h + t.cacheRead > LONG_CONTEXT_TOKENS) {
-    factor *= LONG_CONTEXT_FACTOR
-  }
-  if (r.isFast && FAST_MODELS.includes(key)) factor *= FAST_FACTOR
-  const perToken = (rate: number) => (rate * factor) / 1e6
-  const input = t.input * perToken(price.input)
-  const cacheWrite = t.cacheWrite5m * perToken(price.input * CACHE_WRITE_5M) + t.cacheWrite1h * perToken(price.input * CACHE_WRITE_1H)
-  const cacheRead = t.cacheRead * perToken(price.cacheRead)
-  const output = t.output * perToken(price.output)
-  return { input, cacheWrite, cacheRead, output, total: input + cacheWrite + cacheRead + output }
+// Whether two price lists hold the same models at the same prices, whatever their `since` and order.
+export function samePrices(a: PriceRow[], b: PriceRow[]): boolean {
+  const canonical = (rows: PriceRow[]) =>
+    JSON.stringify([...rows].map((r) => ({ ...r, since: 0 })).sort((x, y) => x.model.localeCompare(y.model)))
+  return canonical(a) === canonical(b)
 }

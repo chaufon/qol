@@ -17,6 +17,17 @@ export type Conversation = {
   prompts: Prompt[]
 }
 
+// USD per million tokens.
+export type Rates = { input: number; cacheWrite5m: number; cacheWrite1h: number; cacheRead: number; output: number }
+// The price of one model from `since` (epoch ms) on. fastFactor: every rate times it in fast mode; null when the
+// model has no fast mode. longRates: the rates of a request whose prompt has more than longAbove tokens.
+export type PriceRow = {
+  since: number; model: string; rates: Rates; fastFactor: number | null; longAbove: number | null; longRates: Rates | null
+}
+// Every stored price row, and the newest price list: where it came from, since when it is in effect, and when it
+// was last confirmed. error: why the last download failed; null when it succeeded or none ran.
+export type PriceBook = { rows: PriceRow[]; source: 'built-in' | 'downloaded'; since: number; checkedAt: number; error: string | null }
+
 export type WindowKind = 'five_hour' | 'seven_day'
 export type Window = { kind: WindowKind; start: number; end: number; percentUsed: number }
 export type WindowTotal = { window: Window; usage: Usage }
@@ -46,6 +57,8 @@ declare module 'claude-code' {
       details: Record<string, Conversation>       // History conversations loaded on expand, by id
       notice: string | null                       // one line, e.g. sqlite3 missing
       now: number                                 // epoch ms of the last refresh, for Today/Yesterday labels
+      prices: PriceBook                           // the prices that cost every request
+      priceAttemptAt: number | null               // epoch ms the last download of the prices started
     }
   }
 }

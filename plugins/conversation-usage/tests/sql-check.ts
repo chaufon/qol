@@ -6,10 +6,11 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 
 import {
-  SCHEMA, selectConversation, selectHistory, selectPrompts, selectSlices, selectSubagents, selectWindows, selectWindowTotal,
-  toHistoryConversation, toPrompt, toRequest, toSlice, toSubagent, toUsage, toWindow,
-  upsertConversation, upsertPrompts, upsertRequests, upsertSubagents, upsertWindow,
+  repriceRequests, replacePriceList, SCHEMA, selectConversation, selectHistory, selectPrices, selectPrompts, selectSlices,
+  selectSubagents, selectWindows, selectWindowTotal, toHistoryConversation, toPriceRow, toPrompt, toRequest, toSlice,
+  toSubagent, toUsage, toWindow, upsertConversation, upsertPrompts, upsertRequests, upsertSubagents, upsertWindow,
 } from '../hooks/sql.ts'
+import { BUILT_IN, costOf } from '../hooks/prices.ts'
 
 const dir = mkdtempSync(join(tmpdir(), 'cu-sql-'))
 const db = join(dir, 'check.db')
@@ -34,8 +35,9 @@ const conversation = {
 
 try {
   run(SCHEMA)
+  run(`BEGIN;\n${replacePriceList(0, 'built-in', 1, BUILT_IN)}\nCOMMIT;`)
   const save = (c: typeof conversation) =>
-    run(`BEGIN;\n${upsertConversation(c)}\n${upsertSubagents(c.id, c.subagents)}\n${upsertRequests(c.id, c.requests)}\n${upsertPrompts(c.id, c.prompts)}\nCOMMIT;`)
+    run(`BEGIN;\n${upsertConversation(c)}\n${upsertSubagents(c.id, c.subagents)}\n${upsertRequests(c.id, c.requests)}\n${upsertPrompts(c.id, c.prompts)}\n${repriceRequests(c.id)}\nCOMMIT;`)
   save(conversation)
   // The first request again with a different output.
   save({ ...conversation, requests: [request('1', 2000, 50)], subagents: [] })
@@ -82,6 +84,47 @@ try {
     run(`BEGIN;\n${upsertConversation({ ...conversation, id: 'c2' })}\nINSERT INTO no_such_table VALUES (1);\nCOMMIT;`),
   )
   assert.equal(run("SELECT COUNT(*) AS n FROM conversations WHERE id = 'c2'")[0]!.n, 0)
+
+  // The stored prices read back as written.
+  assert.deepEqual(run(selectPrices()).map(toPriceRow), BUILT_IN)
+
+  // The SQL prices every request as costOf does: exact ids, dates, tags, fast mode, long context, dated lists.
+  const later = BUILT_IN.map((r) => (r.model === 'claude-opus-5-5' ? { ...r, since: 5000, rates: { ...r.rates, input: 3 } } : { ...r, since: 5000 }))
+  run(`BEGIN;\n${replacePriceList(5000, 'downloaded', 5000, later)}\nCOMMIT;`)
+  const big = { input: 1_000, cacheWrite5m: 2_000, cacheWrite1h: 3_000, cacheRead: 150_000, output: 4_000 }
+  const cases = [
+    ['claude-opus-5-5', false, 2000, tokens(9)], ['claude-opus-5-5', false, 6000, tokens(9)], ['claude-opus-5-5', true, 6000, tokens(9)],
+    ['claude-opus-5-5[1m]', false, 6000, tokens(9)], ['claude-haiku-4-5-20251001', false, 6000, tokens(9)],
+    ['claude-opus-4-5@20251101', false, 6000, tokens(9)], ['claude-opus-4-5-20251101[1m]', false, 6000, tokens(9)],
+    ['claude-opus-5-6', false, 6000, tokens(9)], ['claude-fable-5-2', true, 6000, tokens(9)], ['claude-fable-5', false, 6000, big],
+    ['claude-haiku-5-5', false, 6000, big], ['claude-haiku-5-5', true, 6000, tokens(9)], ['<synthetic>', false, 6000, tokens(9)],
+  ] as const
+  const priced = {
+    id: 'c3', project: '/work/app', title: 'Prices', startedAt: 1500, subagents: [], prompts: [],
+    requests: cases.map(([model, isFast, at, t], i) => ({
+      messageId: `p${i}`, requestId: `q${i}`, agentId: null, at, model, isFast, tokens: t, tools: [], toolUseIds: [],
+    })),
+  }
+  save(priced as unknown as typeof conversation)
+  const allRows = [...BUILT_IN, ...later]
+  for (const r of priced.requests) {
+    const stored = run(`SELECT cost_input, cost_cache_write, cost_cache_read, cost_output FROM requests WHERE message_id = '${r.messageId}'`)[0]!
+    const expected = costOf(r, allRows)
+    const label = `${r.model} fast=${r.isFast} at=${r.at}`
+    if (expected === null) {
+      assert.equal(stored.cost_input, null, label)
+      continue
+    }
+    for (const [column, value] of [['cost_input', expected.input], ['cost_cache_write', expected.cacheWrite], ['cost_cache_read', expected.cacheRead], ['cost_output', expected.output]] as const) {
+      assert.ok(Math.abs(Number(stored[column]) - value) < 1e-12, `${label} ${column}: ${stored[column]} != ${value}`)
+    }
+  }
+  assert.equal(run("SELECT cost_input FROM requests WHERE message_id = 'p7'")[0]!.cost_input, null)
+
+  // A new list prices the stored requests again.
+  run(`BEGIN;\n${replacePriceList(5000, 'downloaded', 5000, later.map((r) => ({ ...r, rates: { ...r.rates, output: r.rates.output * 2 } })))}\n${repriceRequests(null)}\nCOMMIT;`)
+  const doubled = Number(run("SELECT cost_output FROM requests WHERE message_id = 'p1'")[0]!.cost_output)
+  assert.ok(Math.abs(doubled - (9 * 40) / 1e6) < 1e-12, `doubled output: ${doubled}`)
 
   console.log('sql-check: ok')
 } finally {

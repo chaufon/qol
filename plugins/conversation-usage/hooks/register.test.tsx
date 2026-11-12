@@ -27,13 +27,32 @@ const PANE = {
 } as const
 const TURN = { answer: 'reply', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 
-type Calls = { sqlite: string[]; opened: string[]; closed: string[]; registered: string[]; settle: () => Promise<void> }
+type Calls = {
+  sqlite: string[]; fetched: string[]; opened: string[]; closed: string[]; registered: string[]; settle: () => Promise<void>
+}
+
+// The parts of the pricing page the parser reads.
+const PRICING_PAGE = `## Model pricing
+
+| Model | Base input tokens | 5m cache writes | 1h cache writes | Cache hits and refreshes | Output tokens |
+| :---- | :---------------- | :-------------- | :-------------- | :----------------------- | :------------ |
+${['Opus 5.6', 'Opus 5.5', 'Opus 5', 'Sonnet 5.5', 'Haiku 5.5'].map((m) => `| Claude ${m} | $4 / MTok | $5 / MTok | $8 / MTok | $0.20 / MTok | $20 / MTok |`).join('\n')}
+`
 
 // The disk holds one transcript; sqlite3 records its stdin and answers canned rows, or fails to start.
-function engine(on: On, options: { isSqliteMissing?: boolean; failFirstSqlite?: boolean; historyId?: string } = {}): Calls {
+// The pricing page answers `page`, or 503 when it is not given.
+function engine(
+  on: On,
+  options: { isSqliteMissing?: boolean; failFirstSqlite?: boolean; historyId?: string; page?: string; env?: Record<string, string> } = {},
+): Calls {
   const clock = mock.clock(on, { now: NOW })
-  const calls: Calls = { sqlite: [], opened: [], closed: [], registered: [], settle: () => clock.settle() }
-  mock.env(on, { HOME: '/home/u' })
+  const calls: Calls = { sqlite: [], fetched: [], opened: [], closed: [], registered: [], settle: () => clock.settle() }
+  mock.env(on, { HOME: '/home/u', ...options.env })
+  on('http.fetch', (_, e) => {
+    calls.fetched.push(e.url)
+    const ok = options.page !== undefined
+    return { value: { status: ok ? 200 : 503, ok, headers: {}, text: options.page ?? '' } }
+  })
   let hasFailed = false
   const out = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
   on('process.run', (_, e) => {
@@ -211,4 +230,42 @@ test('an expanded History conversation that is the current one shows the fresh r
   await pane.redraw()
   expect(await textOf(pane)).not.toContain('StaleTool')
   await pane.unmount()
+})
+
+test('a refresh downloads the pricing page, stores its prices from now on and prices every request again', async ($, on) => {
+  const calls = engine(on, { page: PRICING_PAGE })
+  await begin($, calls)
+  expect(calls.fetched).toEqual(['https://platform.claude.com/docs/en/about-claude/pricing.md'])
+  const stored = calls.sqlite.find((sql) => sql.includes('INSERT INTO prices') && sql.includes(`('claude-opus-5-6'`) === false && sql.includes(`(${NOW}, 0, 'claude-opus-5-6'`))
+  expect(stored).toBeDefined()
+  expect(stored).toContain(`INSERT INTO price_lists (since, source, checked_at) VALUES\n(${NOW}, 'downloaded', ${NOW})`)
+  expect(stored).toContain('UPDATE requests SET')
+  // A second refresh within the hour downloads nothing.
+  await $.turn.complete(TURN)
+  await calls.settle()
+  expect(calls.fetched).toHaveLength(1)
+})
+
+test('a failed download keeps the built-in prices and says why on the Prices tab', async ($, on) => {
+  const calls = engine(on)
+  await begin($, calls)
+  expect(calls.fetched).toHaveLength(1)
+  expect(calls.sqlite.some((sql) => sql.includes(`(${NOW}, 'downloaded'`))).toBe(false)
+  await run($)
+  await calls.settle()
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await press($, pane, 'tab-next')
+  await press($, pane, 'tab-next')
+  await calls.settle()
+  await pane.redraw()
+  const all = await textOf(pane)
+  expect(all).toContain('Built-in prices')
+  expect(all).toContain('The last download failed: The pricing page answered 503')
+  await pane.unmount()
+})
+
+test('no download while nonessential traffic is off', async ($, on) => {
+  const calls = engine(on, { page: PRICING_PAGE, env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' } })
+  await begin($, calls)
+  expect(calls.fetched).toEqual([])
 })

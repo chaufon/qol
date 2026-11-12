@@ -1,5 +1,6 @@
-import type { Conversation, HistoryConversation, HistorySlice, Prompt, Request, Subagent, Usage, Window, WindowKind } from '../types'
-import { costOf } from './prices'
+import type {
+  Conversation, HistoryConversation, HistorySlice, PriceRow, Prompt, Rates, Request, Subagent, Usage, Window, WindowKind,
+} from '../types'
 
 type Row = Record<string, unknown>
 
@@ -17,6 +18,13 @@ CREATE INDEX IF NOT EXISTS requests_at ON requests (at);
 CREATE INDEX IF NOT EXISTS requests_conversation ON requests (conversation_id);
 CREATE TABLE IF NOT EXISTS prompts (conversation_id TEXT NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (conversation_id, at));
 CREATE TABLE IF NOT EXISTS windows (kind TEXT NOT NULL, start INTEGER NOT NULL, "end" INTEGER NOT NULL, percent_used REAL NOT NULL, PRIMARY KEY (kind, start));
+CREATE TABLE IF NOT EXISTS price_lists (since INTEGER PRIMARY KEY, source TEXT NOT NULL, checked_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS prices (
+  since INTEGER NOT NULL, ord INTEGER NOT NULL, model TEXT NOT NULL,
+  input REAL NOT NULL, cache_write_5m REAL NOT NULL, cache_write_1h REAL NOT NULL, cache_read REAL NOT NULL, output REAL NOT NULL,
+  fast_factor REAL, long_above INTEGER,
+  long_input REAL, long_cache_write_5m REAL, long_cache_write_1h REAL, long_cache_read REAL, long_output REAL,
+  PRIMARY KEY (since, model));
 `
 
 // Rows per INSERT statement.
@@ -52,23 +60,85 @@ function upsert(table: string, columns: string[], key: string[], rows: (string |
 export const upsertConversation = (c: Conversation): string =>
   upsert('conversations', ['id', 'project', 'title', 'started_at'], ['id'], [[c.id, c.project, c.title, c.startedAt]])
 
+// The cost columns are left to `repriceRequests`.
 export function upsertRequests(conversationId: string, rs: Request[]): string {
   const columns = [
     'message_id', 'request_id', 'conversation_id', 'agent_id', 'at', 'model', 'is_fast',
-    'input', 'cache_write_5m', 'cache_write_1h', 'cache_read', 'output',
-    'cost_input', 'cost_cache_write', 'cost_cache_read', 'cost_output', 'tools', 'tool_use_ids',
+    'input', 'cache_write_5m', 'cache_write_1h', 'cache_read', 'output', 'tools', 'tool_use_ids',
   ]
   const rows = rs.map((r) => {
-    const cost = costOf(r)
     const t = r.tokens
     return [
       r.messageId, r.requestId, conversationId, r.agentId, r.at, r.model, r.isFast ? 1 : 0,
       t.input, t.cacheWrite5m, t.cacheWrite1h, t.cacheRead, t.output,
-      cost?.input ?? null, cost?.cacheWrite ?? null, cost?.cacheRead ?? null, cost?.output ?? null,
       JSON.stringify(r.tools), JSON.stringify(r.toolUseIds),
     ]
   })
   return upsert('requests', columns, ['message_id', 'request_id'], rows)
+}
+
+const PRICE_COLUMNS = [
+  'since', 'ord', 'model', 'input', 'cache_write_5m', 'cache_write_1h', 'cache_read', 'output', 'fast_factor', 'long_above',
+  'long_input', 'long_cache_write_5m', 'long_cache_write_1h', 'long_cache_read', 'long_output',
+]
+
+// Stores one price list in place of any list with the same `since`.
+export function replacePriceList(since: number, source: string, checkedAt: number, rows: PriceRow[]): string {
+  const values = rows.map((r, i) => {
+    const l = r.longRates
+    return [
+      since, i, r.model, r.rates.input, r.rates.cacheWrite5m, r.rates.cacheWrite1h, r.rates.cacheRead, r.rates.output,
+      r.fastFactor, r.longAbove, l?.input ?? null, l?.cacheWrite5m ?? null, l?.cacheWrite1h ?? null, l?.cacheRead ?? null,
+      l?.output ?? null,
+    ]
+  })
+  return [
+    `DELETE FROM prices WHERE since = ${quote(since)};`,
+    upsert('price_lists', ['since', 'source', 'checked_at'], ['since'], [[since, source, checkedAt]]),
+    upsert('prices', PRICE_COLUMNS, ['since', 'model'], values),
+  ].filter((s) => s !== '').join('\n')
+}
+
+export const touchPriceList = (since: number, checkedAt: number): string =>
+  `UPDATE price_lists SET checked_at = ${quote(checkedAt)} WHERE since = ${quote(since)};`
+
+export const selectPrices = (): string => `SELECT ${PRICE_COLUMNS.join(', ')} FROM prices ORDER BY since, ord;`
+
+export const selectPriceLists = (): string => `SELECT since, source, checked_at FROM price_lists ORDER BY since;`
+
+// The ids that price under `p.model` (priceKey in prices.ts): the id itself, then with a trailing date,
+// each with or without a trailing `[...]` tag.
+const MATCHES_MODEL = (() => {
+  const date = '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+  const forms = ['', `-${date}`, `@${date}`].flatMap((d) => [d, `${d}[[]*]`])
+  return `(r.model = p.model OR ${forms.slice(1).map((f) => `r.model GLOB p.model || '${f}'`).join(' OR ')})`
+})()
+
+// Sets the cost columns of the stored requests (of one conversation, or all when null) from the prices table,
+// by the rule of costOf in prices.ts: the newest row of the model in effect when the request ran, else its
+// oldest row; NULL when no row names the model.
+export function repriceRequests(conversationId: string | null): string {
+  const scope = conversationId === null ? '' : `WHERE r.conversation_id = ${quote(conversationId)}`
+  return `WITH candidate AS (
+  SELECT r.message_id, r.request_id, p.rowid AS price_id,
+    ROW_NUMBER() OVER (PARTITION BY r.message_id, r.request_id ORDER BY p.since > r.at, IIF(p.since <= r.at, -p.since, p.since)) AS n
+  FROM requests r JOIN prices p ON ${MATCHES_MODEL} ${scope}
+), pick AS (
+  SELECT r.message_id, r.request_id, r.is_fast, r.input + r.cache_write_5m + r.cache_write_1h + r.cache_read AS prompt, c.price_id
+  FROM requests r LEFT JOIN candidate c ON c.message_id = r.message_id AND c.request_id = r.request_id AND c.n = 1 ${scope}
+), x AS (
+  SELECT pick.message_id, pick.request_id, p.*,
+    IIF(pick.is_fast = 1 AND p.fast_factor IS NOT NULL, p.fast_factor, 1) / 1000000.0 AS factor,
+    (p.long_above IS NOT NULL AND p.long_input IS NOT NULL AND pick.prompt > p.long_above) AS is_long
+  FROM pick LEFT JOIN prices p ON p.rowid = pick.price_id
+)
+UPDATE requests SET
+  cost_input = requests.input * IIF(x.is_long, x.long_input, x.input) * x.factor,
+  cost_cache_write = (requests.cache_write_5m * IIF(x.is_long, x.long_cache_write_5m, x.cache_write_5m)
+    + requests.cache_write_1h * IIF(x.is_long, x.long_cache_write_1h, x.cache_write_1h)) * x.factor,
+  cost_cache_read = requests.cache_read * IIF(x.is_long, x.long_cache_read, x.cache_read) * x.factor,
+  cost_output = requests.output * IIF(x.is_long, x.long_output, x.output) * x.factor
+FROM x WHERE requests.message_id = x.message_id AND requests.request_id = x.request_id;`
 }
 
 export const upsertSubagents = (conversationId: string, ss: Subagent[]): string =>
@@ -167,6 +237,27 @@ export const toRequest = (row: Row): Request => ({
   tokens: toUsage({ ...row, cost_count: 0 }).tokens,
   tools: list(row.tools),
   toolUseIds: list(row.tool_use_ids),
+})
+
+const rates = (row: Row, prefix: string): Rates => ({
+  input: num(row[`${prefix}input`]),
+  cacheWrite5m: num(row[`${prefix}cache_write_5m`]),
+  cacheWrite1h: num(row[`${prefix}cache_write_1h`]),
+  cacheRead: num(row[`${prefix}cache_read`]),
+  output: num(row[`${prefix}output`]),
+})
+
+export const toPriceRow = (row: Row): PriceRow => ({
+  since: num(row.since),
+  model: str(row.model),
+  rates: rates(row, ''),
+  fastFactor: numOrNull(row.fast_factor),
+  longAbove: numOrNull(row.long_above),
+  longRates: row.long_input === null || row.long_input === undefined ? null : rates(row, 'long_'),
+})
+
+export const toPriceList = (row: Row): { since: number; source: string; checkedAt: number } => ({
+  since: num(row.since), source: str(row.source), checkedAt: num(row.checked_at),
 })
 
 export const toPrompt = (row: Row): Prompt => ({ at: num(row.at), text: str(row.text) })

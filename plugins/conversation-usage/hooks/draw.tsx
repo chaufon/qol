@@ -1,13 +1,12 @@
 import type { Elements } from 'claude-code'
 
-import type { Conversation, Costs, Grouping, History, Request, Tab, Tokens, Usage, View, WindowTotal } from '../types'
-import { COLORS, fmtCost, fmtPrice, fmtTokens, hhmm, weekday } from './format'
+import type {
+  Conversation, Costs, Grouping, History, PriceBook, Rates, Request, Tab, Tokens, Usage, View, WindowTotal,
+} from '../types'
+import { COLORS, fmtCost, fmtDay, fmtPrice, fmtTokens, hhmm, weekday } from './format'
 import { conversationRows, historyTree, promptGroups, sumUsage } from './model'
 import type { Node, PromptGroup, Row } from './model'
-import {
-  CACHE_WRITE_1H, CACHE_WRITE_5M, FAST_FACTOR, FAST_MODELS, LONG_CONTEXT_FACTOR, LONG_CONTEXT_MODEL,
-  LONG_CONTEXT_TOKENS, PRICES, ZERO_TOKENS,
-} from './prices'
+import { PRICING_URL, ZERO_TOKENS } from './prices'
 
 export type Actions = {
   toggle(key: string, isOpen: boolean): void
@@ -24,7 +23,7 @@ export type Actions = {
 export type PaneProps = {
   width: number; tab: Tab; view: View; grouping: Grouping; current: Conversation | null
   windowTotals: WindowTotal[]; history: History; details: Record<string, Conversation>
-  expanded: Record<string, boolean>; notice: string | null; now: number; isFullscreen: boolean
+  expanded: Record<string, boolean>; notice: string | null; now: number; isFullscreen: boolean; prices: PriceBook
   scroll: { offset: number; bodyRows: number }
 }
 
@@ -386,31 +385,48 @@ function historyTab(c: Ctx, p: PaneProps): El[] {
   ]
 }
 
-// One row per model, in USD per million tokens, then, under a dashed line, the factors some requests are charged.
-function pricesTab(c: Ctx): El[] {
+// The newest price list, one row per model in USD per million tokens (a second row for the prices above a
+// prompt length), then, under a dashed line, where the prices come from and the factors some requests are charged.
+function pricesTab(c: Ctx, book: PriceBook): El[] {
   const { Box, Text } = c.ui
   const modelW = c.width - 5 * PRICE_COL
   const names = ['input', 'write 5m', 'write 1h', 'read', 'output'].map((n) => rcell(n, PRICE_COL)).join('')
-  const rows = Object.entries(PRICES).map(([model, p], i) => (
-    <Box key={`price:${model}`} backgroundColor={i % 2 === 1 ? STRIPE : undefined}>
-      <Text color={WHITE}>{cell(model, modelW)}</Text>
-      {[p.input, p.input * CACHE_WRITE_5M, p.input * CACHE_WRITE_1H, p.cacheRead, p.output].map((v) => (
+  const listed = book.rows.filter((r) => r.since === book.since)
+  const lines: [string, Rates][] = listed.flatMap((r) => [
+    [r.model, r.rates] as [string, Rates],
+    ...(r.longAbove !== null && r.longRates !== null
+      ? [[`${r.model} >${r.longAbove.toLocaleString('en-US')}`, r.longRates] as [string, Rates]]
+      : []),
+  ])
+  const rows = lines.map(([label, p], i) => (
+    <Box key={`price:${label}`} backgroundColor={i % 2 === 1 ? STRIPE : undefined}>
+      <Text color={WHITE}>{cell(label, modelW)}</Text>
+      {[p.input, p.cacheWrite5m, p.cacheWrite1h, p.cacheRead, p.output].map((v) => (
         <Text color={COLORS.cost}>{rcell(fmtPrice(v), PRICE_COL)}</Text>
       ))}
     </Box>
   ))
   const rule = <Text dimColor>{`${cell(dashes(modelW), modelW)}${rcell(dashes(PRICE_COL), PRICE_COL).repeat(5)}`}</Text>
+  const fast = listed.filter((r) => r.fastFactor !== null)
+  const long = listed.filter((r) => r.longAbove !== null && r.longRates !== null)
+  const page = PRICING_URL.replace(/^https:\/\//, '').replace(/\.md$/, '')
+  const source = book.source === 'downloaded'
+    ? `Prices from ${page}, in effect since ${fmtDay(book.since)}, last checked ${fmtDay(book.checkedAt)}.`
+    : `Built-in prices, read from ${page} on ${fmtDay(book.checkedAt)}.`
+  const notes = [
+    source,
+    ...(book.error === null ? [] : [`The last download failed: ${book.error}`]),
+    ...[...new Set(fast.map((r) => r.fastFactor!))].map((factor) =>
+      `Fast mode on ${fast.filter((r) => r.fastFactor === factor).map((r) => r.model).join(', ')}: every price x ${factor}.`),
+    ...long.map((r) => `${r.model} with more than ${r.longAbove!.toLocaleString('en-US')} prompt tokens in one request: the prices of its > row.`),
+    'Each request is priced with the list in effect when it ran. A model id prices only under its exact name, with or without a date; any other model has no cost, shown as ?.',
+  ]
   return [
     <Text dimColor>{`${cell('USD per million tokens', modelW)}${names}`}</Text>,
     rule,
     ...rows,
     rule,
-    ...[
-      `A cache write costs ${CACHE_WRITE_5M} x input for 5 minutes, ${CACHE_WRITE_1H} x input for 1 hour.`,
-      `Fast mode on ${FAST_MODELS.join(' and ')}: every price x ${FAST_FACTOR}.`,
-      `${LONG_CONTEXT_MODEL} with more than ${LONG_CONTEXT_TOKENS.toLocaleString('en-US')} input tokens in one request: every price x ${LONG_CONTEXT_FACTOR}.`,
-      'A model missing from this table has no cost, shown as ?.',
-    ].map((note) => (
+    ...notes.map((note) => (
       <Box key={note}>
         <Text dimColor>{'• '}</Text>
         <Box width={c.width - 2}><Text dimColor wrap="wrap">{note}</Text></Box>
@@ -480,7 +496,7 @@ export function drawPane(ui: Ui, p: PaneProps, actions: Actions): El {
       {switchView(c, 'tab', tabs, p.tab, actions.selectTab)}
       <Text dimColor>{'─'.repeat(p.width)}</Text>
       {p.notice === null ? null : <Text dimColor>{p.notice}</Text>}
-      {p.tab === 'conversation' ? conversationTab(c, p) : p.tab === 'history' ? historyTab(c, p) : pricesTab(c)}
+      {p.tab === 'conversation' ? conversationTab(c, p) : p.tab === 'history' ? historyTab(c, p) : pricesTab(c, p.prices)}
       {footer(c, p)}
     </Box>
   )
