@@ -6,11 +6,23 @@ export const PRICING_URL = 'https://platform.claude.com/docs/en/about-claude/pri
 // When the built-in prices were read from the pricing page.
 export const BUILT_IN_CHECKED_AT = new Date(2026, 10, 11).getTime()
 
-const rates = (input: number, cacheWrite5m: number, cacheWrite1h: number, cacheRead: number, output: number): Rates =>
-  ({ input, cacheWrite5m, cacheWrite1h, cacheRead, output })
+const rates = (
+  input: number,
+  cacheWrite5m: number,
+  cacheWrite1h: number,
+  cacheRead: number,
+  output: number,
+): Rates => ({ input, cacheWrite5m, cacheWrite1h, cacheRead, output })
 
-const row = (model: string, r: Rates, extra: Partial<PriceRow> = {}): PriceRow =>
-  ({ since: 0, model, rates: r, fastFactor: null, longAbove: null, longRates: null, ...extra })
+const row = (model: string, r: Rates, extra: Partial<PriceRow> = {}): PriceRow => ({
+  since: 0,
+  model,
+  rates: r,
+  fastFactor: null,
+  longAbove: null,
+  longRates: null,
+  ...extra,
+})
 
 // USD per million tokens, in the order of the pricing page. `since` 0: in effect for every request
 // older than the first downloaded list, and for every model no downloaded list names.
@@ -35,13 +47,18 @@ export const BUILT_IN: PriceRow[] = [
   row('claude-sonnet-4-5', rates(3, 3.75, 6, 0.3, 15)),
   row('claude-sonnet-4', rates(3, 3.75, 6, 0.3, 15)),
   row('claude-haiku-5-5', rates(0.1, 0.125, 0.2, 0.01, 0.5), {
-    longAbove: 100_000, longRates: rates(0.5, 0.625, 1, 0.05, 2.5),
+    longAbove: 100_000,
+    longRates: rates(0.5, 0.625, 1, 0.05, 2.5),
   }),
   row('claude-haiku-4-5', rates(1, 1.25, 2, 0.1, 5)),
 ]
 
 export const BUILT_IN_BOOK: PriceBook = {
-  rows: BUILT_IN, source: 'built-in', checkedAt: BUILT_IN_CHECKED_AT, since: 0, error: null,
+  rows: BUILT_IN,
+  source: 'built-in',
+  checkedAt: BUILT_IN_CHECKED_AT,
+  since: 0,
+  error: null,
 }
 
 // The price key of a model id: the id without a trailing `[...]` tag (`[1m]`) and without a trailing
@@ -99,12 +116,15 @@ export const addCosts = (a: Costs | null, b: Costs | null): Costs | null => {
 
 // The cost of one request at the prices in effect when it ran; null when no price list names its model.
 // The same rule as `repriceRequests` in sql.ts, which prices the stored requests.
-export function costOf(r: Pick<Request, 'model' | 'tokens' | 'isFast' | 'at'>, rows: PriceRow[] = book.rows): Costs | null {
+export function costOf(
+  r: Pick<Request, 'model' | 'tokens' | 'isFast' | 'at'>,
+  rows: PriceRow[] = book.rows,
+): Costs | null {
   const price = rowFor(rows, r.model, r.at)
   if (price === null) return null
   const t = r.tokens
   const isLong = price.longAbove !== null && price.longRates !== null && promptTokens(t) > price.longAbove
-  const p = isLong ? price.longRates! : price.rates
+  const p = isLong && price.longRates !== null ? price.longRates : price.rates
   const factor = r.isFast && price.fastFactor !== null ? price.fastFactor : 1
   const per = (rate: number) => (rate * factor) / 1e6
   const input = t.input * per(p.input)
@@ -117,6 +137,6 @@ export function costOf(r: Pick<Request, 'model' | 'tokens' | 'isFast' | 'at'>, r
 // Whether two price lists hold the same models at the same prices, whatever their `since` and order.
 export function samePrices(a: PriceRow[], b: PriceRow[]): boolean {
   const canonical = (rows: PriceRow[]) =>
-    JSON.stringify([...rows].map((r) => ({ ...r, since: 0 })).sort((x, y) => x.model.localeCompare(y.model)))
+    JSON.stringify([...rows].map(r => ({ ...r, since: 0 })).sort((x, y) => x.model.localeCompare(y.model)))
   return canonical(a) === canonical(b)
 }

@@ -44,10 +44,16 @@ test('the model table gives one row per model id, in page order', () => {
   const rows = parsePricingPage(PAGE, 42)
   expect(Array.isArray(rows)).toBe(true)
   if (!Array.isArray(rows)) return
-  expect(rows.map((r) => r.model)).toEqual([
-    'claude-fable-5-2', 'claude-mythos-5-2', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-1', 'claude-sonnet-5', 'claude-haiku-5-5',
+  expect(rows.map(r => r.model)).toEqual([
+    'claude-fable-5-2',
+    'claude-mythos-5-2',
+    'claude-opus-5-5',
+    'claude-opus-5',
+    'claude-opus-4-1',
+    'claude-sonnet-5',
+    'claude-haiku-5-5',
   ])
-  expect(rows.every((r) => r.since === 42)).toBe(true)
+  expect(rows.every(r => r.since === 42)).toBe(true)
   expect(rows[2]!.rates).toEqual({ input: 4, cacheWrite5m: 5, cacheWrite1h: 8, cacheRead: 0.2, output: 20 })
   expect(rows[4]!.rates.cacheWrite5m).toBe(18.75)
 })
@@ -55,25 +61,27 @@ test('the model table gives one row per model id, in page order', () => {
 test('a model priced by prompt length gets its long-context rates', () => {
   const rows = parsePricingPage(PAGE, 0)
   if (!Array.isArray(rows)) throw new Error('parse failed')
-  const haiku = rows.find((r) => r.model === 'claude-haiku-5-5')!
+  const haiku = rows.find(r => r.model === 'claude-haiku-5-5')!
   expect(haiku.rates.input).toBe(0.1)
   expect(haiku.longAbove).toBe(100_000)
   expect(haiku.longRates).toEqual({ input: 0.5, cacheWrite5m: 0.625, cacheWrite1h: 1, cacheRead: 0.05, output: 2.5 })
-  expect(rows.find((r) => r.model === 'claude-opus-5')!.longRates).toBeNull()
+  expect(rows.find(r => r.model === 'claude-opus-5')!.longRates).toBeNull()
 })
 
 test('the fast mode table sets a factor on the models it names that the model table lists', () => {
   const rows = parsePricingPage(PAGE, 0)
   if (!Array.isArray(rows)) throw new Error('parse failed')
-  const factor = (m: string) => rows.find((r) => r.model === m)?.fastFactor
+  const factor = (m: string) => rows.find(r => r.model === m)?.fastFactor
   expect(factor('claude-fable-5-2')).toBe(2)
   expect(factor('claude-opus-5-5')).toBe(2)
   expect(factor('claude-opus-5')).toBe(2)
   expect(factor('claude-sonnet-5')).toBeNull()
-  expect(rows.some((r) => r.model === 'claude-opus-4-8')).toBe(false)
+  expect(rows.some(r => r.model === 'claude-opus-4-8')).toBe(false)
 })
 
 test('a page without the model table is an error', () => {
-  expect(parsePricingPage('# Pricing\n\nNothing here.', 0)).toEqual({ error: 'The pricing page lists 0 models in a form this mod reads' })
+  expect(parsePricingPage('# Pricing\n\nNothing here.', 0)).toEqual({
+    error: 'The pricing page lists 0 models in a form this mod reads',
+  })
   expect('error' in (parsePricingPage(PAGE.replace('## Model pricing', '## Prices'), 0) as object)).toBe(true)
 })

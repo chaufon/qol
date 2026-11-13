@@ -8,6 +8,10 @@ import type { Segment } from './format'
 const snapshot = atom({ plugin: 'usage-footer', key: 'snapshot' } as const, null)
 const now = atom({ plugin: 'usage-footer', key: 'now' } as const, 0)
 
+// The fields a snapshot stored by an earlier version of the mod may lack.
+type Added = 'isEstimate' | 'contextWindow' | 'sevenDayPercent' | 'sevenDayResetsAt'
+type StoredSnapshot = Omit<Snapshot, Added> & Partial<Pick<Snapshot, Added>>
+
 const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]): Snapshot => {
   const fiveHour = rateLimits.find(r => r.kind === 'five_hour')
   const week = rateLimits.find(r => r.kind === 'seven_day')
@@ -43,7 +47,12 @@ const keepWindows = (read: Snapshot, s: Snapshot | null, t: number): Snapshot =>
 // Commands that change the context without a response: `estimate` counts the
 // conversation as /context does, `rescale` keeps the size and measures it
 // against the model's window.
-const RECOUNTS: Record<string, Recount> = { clear: 'estimate', rewind: 'estimate', resume: 'estimate', model: 'rescale' }
+const RECOUNTS: Record<string, Recount> = {
+  clear: 'estimate',
+  rewind: 'estimate',
+  resume: 'estimate',
+  model: 'rescale',
+}
 
 type Recount = 'estimate' | 'rescale'
 
@@ -132,14 +141,12 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const stored = await read($, snapshot)
+    const stored: StoredSnapshot | null = await read($, snapshot)
 
     if (stored === null) {
       return next(e)
     }
 
-    // A snapshot stored by an earlier version of the mod lacks the fields it
-    // added since.
     const s: Snapshot = {
       ...stored,
       isEstimate: stored.isEstimate ?? false,
@@ -158,7 +165,7 @@ export const register: Register = on => {
     const after = at === -1 ? [] : parts.slice(at + 1)
     const draw = (list: Segment[]) =>
       list.map(p => (
-        <Text color={p.tone} bold={p.isBold} dimColor={p.isDim}>
+        <Text color={p.tone} weight={p.isBold ? 'semibold' : undefined} dimColor={p.isDim}>
           {p.text}
         </Text>
       ))
@@ -174,7 +181,7 @@ export const register: Register = on => {
         </Text>
         {size !== undefined && (
           <Box key="context">
-            <Text color={size.tone} bold={size.isBold}>
+            <Text color={size.tone} weight={size.isBold ? 'semibold' : undefined}>
               {size.text}
             </Text>
             {size.hint !== undefined && (

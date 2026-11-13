@@ -6,29 +6,71 @@ const NOW = Date.parse('2026-10-28T12:00:00.000Z')
 const ROOT = '/home/u/.claude'
 const MAIN = `${ROOT}/projects/-work-app/c1.jsonl`
 const TRANSCRIPT =
-  JSON.stringify({ type: 'user', timestamp: '2026-10-28T09:59:00.000Z', message: { role: 'user', content: 'Hello there' } }) + '\n' +
   JSON.stringify({
-    type: 'assistant', requestId: 'req_1', timestamp: '2026-10-28T10:00:00.000Z', cwd: '/work/app',
+    type: 'user',
+    timestamp: '2026-10-28T09:59:00.000Z',
+    message: { role: 'user', content: 'Hello there' },
+  }) +
+  '\n' +
+  JSON.stringify({
+    type: 'assistant',
+    requestId: 'req_1',
+    timestamp: '2026-10-28T10:00:00.000Z',
+    cwd: '/work/app',
     message: {
-      id: 'msg_1', model: 'claude-opus-5', content: [{ type: 'text', text: 'a' }],
+      id: 'msg_1',
+      model: 'claude-opus-5',
+      content: [{ type: 'text', text: 'a' }],
       usage: { input_tokens: 100, output_tokens: 200, cache_creation_input_tokens: 19_300 },
     },
-  }) + '\n'
+  }) +
+  '\n'
 
-const HISTORY_ROW = { id: 'h1', project: '/work/old', title: 'Old chat', started_at: NOW - 86_400_000, request_count: 2, input: 5 }
+const HISTORY_ROW = {
+  id: 'h1',
+  project: '/work/old',
+  title: 'Old chat',
+  started_at: NOW - 86_400_000,
+  request_count: 2,
+  input: 5,
+}
 
 const BAND = {
-  plugin: 'conversation-usage', component: 'AbovePrompt', requestId: 'band',
-  props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  plugin: 'conversation-usage',
+  component: 'AbovePrompt',
+  requestId: 'band',
+  props: {
+    hasSurvey: false,
+    isCollapsed: false,
+    isWorking: false,
+    maxRows: 10,
+    bodyColumns: 80,
+    scroll: { offset: 0, bodyRows: 10 },
+    view: {},
+  },
 } as const
 const PANE = {
-  plugin: 'conversation-usage', component: 'Pane', requestId: 'conversation-usage',
-  props: { title: 'Usage', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+  plugin: 'conversation-usage',
+  component: 'Pane',
+  requestId: 'conversation-usage',
+  props: {
+    title: 'Usage',
+    isFocused: true,
+    bodyColumns: 80,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 30 },
+    view: {},
+  },
 } as const
 const TURN = { answer: 'reply', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 
-type Calls = {
-  sqlite: string[]; fetched: string[]; opened: string[]; closed: string[]; registered: string[]; settle: () => Promise<void>
+interface Calls {
+  sqlite: string[]
+  fetched: string[]
+  opened: string[]
+  closed: string[]
+  registered: string[]
+  settle: () => Promise<void>
 }
 
 // The parts of the pricing page the parser reads.
@@ -36,14 +78,20 @@ const PRICING_PAGE = `## Model pricing
 
 | Model | Base input tokens | 5m cache writes | 1h cache writes | Cache hits and refreshes | Output tokens |
 | :---- | :---------------- | :-------------- | :-------------- | :----------------------- | :------------ |
-${['Opus 5.6', 'Opus 5.5', 'Opus 5', 'Sonnet 5.5', 'Haiku 5.5'].map((m) => `| Claude ${m} | $4 / MTok | $5 / MTok | $8 / MTok | $0.20 / MTok | $20 / MTok |`).join('\n')}
+${['Opus 5.6', 'Opus 5.5', 'Opus 5', 'Sonnet 5.5', 'Haiku 5.5'].map(m => `| Claude ${m} | $4 / MTok | $5 / MTok | $8 / MTok | $0.20 / MTok | $20 / MTok |`).join('\n')}
 `
 
 // The disk holds one transcript; sqlite3 records its stdin and answers canned rows, or fails to start.
 // The pricing page answers `page`, or 503 when it is not given.
 function engine(
   on: On,
-  options: { isSqliteMissing?: boolean; failFirstSqlite?: boolean; historyId?: string; page?: string; env?: Record<string, string> } = {},
+  options: {
+    isSqliteMissing?: boolean
+    failFirstSqlite?: boolean
+    historyId?: string
+    page?: string
+    env?: Record<string, string>
+  } = {},
 ): Calls {
   const clock = mock.clock(on, { now: NOW })
   const calls: Calls = { sqlite: [], fetched: [], opened: [], closed: [], registered: [], settle: () => clock.settle() }
@@ -54,7 +102,13 @@ function engine(
     return { value: { status: ok ? 200 : 503, ok, headers: {}, text: options.page ?? '' } }
   })
   let hasFailed = false
-  const out = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
+  const out = (stdout: string, exitCode = 0) => ({
+    exitCode,
+    stdout,
+    stderr: '',
+    isStdoutTruncated: false,
+    isStderrTruncated: false,
+  })
   on('process.run', (_, e) => {
     if (e.argv[0] === 'sqlite3') {
       if (options.isSqliteMissing) throw new Error('spawn sqlite3 ENOENT')
@@ -65,7 +119,18 @@ function engine(
       const sql = e.init?.stdin ?? ''
       calls.sqlite.push(sql)
       if (sql.includes(`WHERE c.id = 'c1'`)) {
-        const stale = { project: '/work/app', title: 'Current', started_at: NOW - 1000, message_id: 'm0', request_id: 'r0', at: NOW - 1000, model: 'claude-opus-5', tools: '["StaleTool"]', tool_use_ids: '[]', input: 1 }
+        const stale = {
+          project: '/work/app',
+          title: 'Current',
+          started_at: NOW - 1000,
+          message_id: 'm0',
+          request_id: 'r0',
+          at: NOW - 1000,
+          model: 'claude-opus-5',
+          tools: '["StaleTool"]',
+          tool_use_ids: '[]',
+          input: 1,
+        }
         return { value: out(JSON.stringify([stale])) }
       }
       if (sql.includes('FROM conversations c LEFT JOIN requests r ON r.conversation_id = c.id\nGROUP BY')) {
@@ -77,9 +142,18 @@ function engine(
     if (e.argv[0] === 'tail') return { value: out(TRANSCRIPT.slice(Number(e.argv[2]!.slice(1)) - 1)) }
     return { value: out('', 1) }
   })
-  on('ui.open', (_, e) => { calls.opened.push(e.id); return { value: { isPlaced: true } } })
-  on('ui.close', (_, e) => { calls.closed.push(e.id); return { value: undefined } })
-  on('command.register', (_, e) => { calls.registered.push(e.name); return { value: { command: e.name } } })
+  on('ui.open', (_, e) => {
+    calls.opened.push(e.id)
+    return { value: { isPlaced: true } }
+  })
+  on('ui.close', (_, e) => {
+    calls.closed.push(e.id)
+    return { value: undefined }
+  })
+  on('command.register', (_, e) => {
+    calls.registered.push(e.name)
+    return { value: { command: e.name } }
+  })
   on('session.id', () => ({ value: 'c1' }))
   on('session.cwd', () => ({ value: '/work/app' }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -96,9 +170,11 @@ const begin = async ($: Engine, calls: Calls) => {
   await calls.settle()
 }
 
-type Found = { findAll(q: { type: 'Text' | 'Button' }): Promise<{ text?: string | undefined }[]> }
+interface Found {
+  findAll(q: { type: 'Text' | 'Button' }): Promise<{ text?: string | undefined }[]>
+}
 const textOf = async (ui: Found) =>
-  [...(await ui.findAll({ type: 'Text' })), ...(await ui.findAll({ type: 'Button' }))].map((t) => t.text ?? '').join('\n')
+  [...(await ui.findAll({ type: 'Text' })), ...(await ui.findAll({ type: 'Button' }))].map(t => t.text ?? '').join('\n')
 
 const press = async ($: Engine, ui: { redraw(): Promise<void> }, key: string) => {
   await $.ui.press({ plugin: 'conversation-usage', key })
@@ -106,7 +182,12 @@ const press = async ($: Engine, ui: { redraw(): Promise<void> }, key: string) =>
 }
 
 const run = ($: Engine) =>
-  $.command.run({ command: 'conversation-usage', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
+  $.command.run({
+    command: 'conversation-usage',
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 120 },
+  })
 
 test('the band shows the total and its button opens and closes the pane', async ($, on) => {
   const calls = engine(on)
@@ -164,10 +245,12 @@ test('a 5-hour reading is stored as a window', async ($, on) => {
   await begin($, calls)
   const resetsAt = new Date(NOW + 3_600_000).toISOString()
   await $.session.measure({
-    context: { window: 200_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 12, resetsAt }], changed: ['rateLimits'],
+    context: { window: 200_000 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 12, resetsAt }],
+    changed: ['rateLimits'],
   })
   await calls.settle()
-  expect(calls.sqlite.some((sql) => sql.includes('INSERT') && sql.includes('windows'))).toBe(true)
+  expect(calls.sqlite.some(sql => sql.includes('INSERT') && sql.includes('windows'))).toBe(true)
 })
 
 test('the History tab queries history and expanding a conversation loads it', async ($, on) => {
@@ -184,12 +267,12 @@ test('the History tab queries history and expanding a conversation loads it', as
   expect(await textOf(pane)).toContain('Old chat')
   const queries = calls.sqlite.length
   const buttons = await pane.findAll({ type: 'Button' })
-  const title = buttons.find((b) => (b.text ?? '').includes('Old chat'))
+  const title = buttons.find(b => b.text.includes('Old chat'))
   expect(title).toBeDefined()
-  await $.ui.press({ plugin: 'conversation-usage', key: title!.key as string })
+  await $.ui.press({ plugin: 'conversation-usage', key: title!.key! })
   await calls.settle()
   await pane.redraw()
-  expect(calls.sqlite.slice(queries).some((sql) => sql.includes(`WHERE c.id = 'h1'`))).toBe(true)
+  expect(calls.sqlite.slice(queries).some(sql => sql.includes(`WHERE c.id = 'h1'`))).toBe(true)
   await pane.unmount()
 })
 
@@ -220,8 +303,8 @@ test('an expanded History conversation that is the current one shows the fresh r
   await calls.settle()
   await pane.redraw()
   const buttons = await pane.findAll({ type: 'Button' })
-  const title = buttons.find((b) => (b.text ?? '').includes('Old chat'))
-  await $.ui.press({ plugin: 'conversation-usage', key: title!.key as string })
+  const title = buttons.find(b => b.text.includes('Old chat'))
+  await $.ui.press({ plugin: 'conversation-usage', key: title!.key! })
   await calls.settle()
   await pane.redraw()
   expect(await textOf(pane)).toContain('StaleTool')
@@ -236,7 +319,12 @@ test('a refresh downloads the pricing page, stores its prices from now on and pr
   const calls = engine(on, { page: PRICING_PAGE })
   await begin($, calls)
   expect(calls.fetched).toEqual(['https://platform.claude.com/docs/en/about-claude/pricing.md'])
-  const stored = calls.sqlite.find((sql) => sql.includes('INSERT INTO prices') && sql.includes(`('claude-opus-5-6'`) === false && sql.includes(`(${NOW}, 0, 'claude-opus-5-6'`))
+  const stored = calls.sqlite.find(
+    sql =>
+      sql.includes('INSERT INTO prices') &&
+      !sql.includes(`('claude-opus-5-6'`) &&
+      sql.includes(`(${NOW}, 0, 'claude-opus-5-6'`),
+  )
   expect(stored).toBeDefined()
   expect(stored).toContain(`INSERT INTO price_lists (since, source, checked_at) VALUES\n(${NOW}, 'downloaded', ${NOW})`)
   expect(stored).toContain('UPDATE requests SET')
@@ -250,7 +338,7 @@ test('a failed download keeps the built-in prices and says why on the Prices tab
   const calls = engine(on)
   await begin($, calls)
   expect(calls.fetched).toHaveLength(1)
-  expect(calls.sqlite.some((sql) => sql.includes(`(${NOW}, 'downloaded'`))).toBe(false)
+  expect(calls.sqlite.some(sql => sql.includes(`(${NOW}, 'downloaded'`))).toBe(false)
   await run($)
   await calls.settle()
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })

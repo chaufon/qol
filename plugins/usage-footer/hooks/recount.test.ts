@@ -3,7 +3,12 @@ import type { TestBody } from 'claude-code/testing'
 
 import { expect, mock, test } from 'claude-code/testing'
 
-type Usage = { window: number; estimate: number; counts?: number; tokens?: number }
+interface Usage {
+  window: number
+  estimate: number
+  counts?: number
+  tokens?: number
+}
 type TestEngine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
 
@@ -33,10 +38,19 @@ const engine = (on: On, usage: Usage) => {
 }
 
 const measured = ($: TestEngine) =>
-  $.session.measure({ context: { tokens: 122_000, window: 200_000, percent: 61 }, rateLimits: [], changed: ['context'] })
+  $.session.measure({
+    context: { tokens: 122_000, window: 200_000, percent: 61 },
+    rateLimits: [],
+    changed: ['context'],
+  })
 
 const footer = async ($: TestEngine) => {
-  const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  const ui = await $.ui.mount({
+    plugin: 'usage-footer',
+    surface: 'terminal',
+    component: 'SessionMode',
+    props: { modes: [] },
+  })
   const texts = (await ui.findAll({ type: 'Box' }))[0]?.text ?? ''
   await ui.unmount()
 
@@ -44,7 +58,12 @@ const footer = async ($: TestEngine) => {
 }
 
 const run = ($: TestEngine, command: string) =>
-  $.command.run({ command, args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
+  $.command.run({
+    command,
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 120 },
+  })
 
 for (const command of ['clear', 'rewind', 'resume']) {
   test(`/${command} shows the estimated size of the conversation it leaves`, async ($, on) => {
@@ -126,7 +145,11 @@ test('a reading without rate limits after /clear keeps both windows', async ($, 
   await withWindows($)
 
   await run($, 'clear')
-  await $.session.measure({ context: { tokens: 21_000, window: 200_000, percent: 11 }, rateLimits: [], changed: ['context', 'rateLimits'] })
+  await $.session.measure({
+    context: { tokens: 21_000, window: 200_000, percent: 11 },
+    rateLimits: [],
+    changed: ['context', 'rateLimits'],
+  })
 
   expect(await footer($)).toContain(' 14%')
   expect(await footer($)).toContain('🔋 30%')
@@ -138,17 +161,24 @@ test('a reading without rate limits drops a window that has reset', async ($, on
   await withWindows($)
 
   await clock.advance(5 * 60 * 60_000)
-  await $.session.measure({ context: { tokens: 21_000, window: 200_000, percent: 11 }, rateLimits: [], changed: ['context', 'rateLimits'] })
+  await $.session.measure({
+    context: { tokens: 21_000, window: 200_000, percent: 11 },
+    rateLimits: [],
+    changed: ['context', 'rateLimits'],
+  })
 
   expect(await footer($)).not.toContain(' 14%')
   expect(await footer($)).toContain('🔋 30%')
 
   await clock.advance(7 * 24 * 60 * 60_000)
-  await $.session.measure({ context: { tokens: 21_000, window: 200_000, percent: 11 }, rateLimits: [], changed: ['context', 'rateLimits'] })
+  await $.session.measure({
+    context: { tokens: 21_000, window: 200_000, percent: 11 },
+    rateLimits: [],
+    changed: ['context', 'rateLimits'],
+  })
 
   expect(await footer($)).not.toContain('🔋')
 })
-
 
 const start = ($: TestEngine) => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
@@ -176,7 +206,11 @@ test('the next response replaces the estimate and its mark', async ($, on) => {
   await measured($)
   await run($, 'clear')
 
-  await $.session.measure({ context: { tokens: 25_000, window: 200_000, percent: 13 }, rateLimits: [], changed: ['context'] })
+  await $.session.measure({
+    context: { tokens: 25_000, window: 200_000, percent: 13 },
+    rateLimits: [],
+    changed: ['context'],
+  })
 
   expect(await footer($)).toContain('📚 25k 13% of 200k')
   expect(await footer($)).not.toContain('~')

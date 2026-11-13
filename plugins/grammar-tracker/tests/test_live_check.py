@@ -17,6 +17,7 @@ Run them from the repository root, with `claude` on the PATH and logged in:
 Each run has no tools, no MCP servers and no saved session, runs in an empty folder, and is told to answer only OK
 after the check. The test sets CLAUDE_CODE_PLUGIN_CACHE_DIR to a plugins folder of its own, so it writes nothing to the
 real grammar.db, and CLAUDE_CODE_MAX_OUTPUT_TOKENS to cap each reply; neither needs setting by hand."""
+
 import json
 import os
 import shutil
@@ -30,8 +31,10 @@ import pytest
 from conftest import ROOT
 from lib.transcript import Check, extract_check
 
-pytestmark = pytest.mark.skipif(os.environ.get("GRAMMAR_TRACKER_LIVE") != "1",
-                                reason="live grammar check tests run only with GRAMMAR_TRACKER_LIVE=1")
+pytestmark = pytest.mark.skipif(
+    os.environ.get("GRAMMAR_TRACKER_LIVE") != "1",
+    reason="live grammar check tests run only with GRAMMAR_TRACKER_LIVE=1",
+)
 
 
 @dataclass(frozen=True)
@@ -49,47 +52,76 @@ def sample(language: str, prompt: str, types: set[str], gone: str) -> Sample:
 SAMPLES = (
     # French: present for an action that continues, "expliquer à quelqu'un", "assister à", "informations",
     # "elle" for a feminine noun, plural adjectives.
-    sample("French", "I am working on this project since two years, so I know the code well.",
-           {"wrong_tense", "preposition"}, "since two years"),
-    sample("French", "Can you explain me why the build fails on the main branch?",
-           {"verb_pattern", "preposition", "word_choice"}, "explain me"),
-    sample("French", "I assisted to the meeting yesterday, and they asked me to fix the login page.",
-           {"false_friend", "word_choice", "preposition"}, "assisted to"),
+    sample(
+        "French",
+        "I am working on this project since two years, so I know the code well.",
+        {"wrong_tense", "preposition"},
+        "since two years",
+    ),
+    sample(
+        "French",
+        "Can you explain me why the build fails on the main branch?",
+        {"verb_pattern", "preposition", "word_choice"},
+        "explain me",
+    ),
+    sample(
+        "French",
+        "I assisted to the meeting yesterday, and they asked me to fix the login page.",
+        {"false_friend", "word_choice", "preposition"},
+        "assisted to",
+    ),
     sample("French", "The informations about the error are in the log file.", {"countability"}, "informations"),
-    sample("French", "The function is slow because she reads the whole file into memory.", {"pronoun"},
-           "because she reads"),
+    sample(
+        "French", "The function is slow because she reads the whole file into memory.", {"pronoun"}, "because she reads"
+    ),
     sample("French", "We tested differents options for the cache last week.", {"agreement"}, "differents"),
     # Portuguese: dropped subject, "pretender" (intend), "preciso que você", perfect for a finished past action, "seu"
     # agreeing with the thing owned.
-    sample("Portuguese", "Is important to run the tests before we merge the branch.", {"missing_subject"},
-           "Is important"),
-    sample("Portuguese", "I pretend to finish the migration today, so please review it soon.",
-           {"false_friend", "word_choice"}, "pretend"),
-    sample("Portuguese", "I need that you push the changes to the remote repository.", {"verb_pattern"},
-           "need that you"),
+    sample(
+        "Portuguese", "Is important to run the tests before we merge the branch.", {"missing_subject"}, "Is important"
+    ),
+    sample(
+        "Portuguese",
+        "I pretend to finish the migration today, so please review it soon.",
+        {"false_friend", "word_choice"},
+        "pretend",
+    ),
+    sample(
+        "Portuguese", "I need that you push the changes to the remote repository.", {"verb_pattern"}, "need that you"
+    ),
     sample("Portuguese", "Yesterday I have fixed the bug in the parser.", {"wrong_tense"}, "have fixed"),
-    sample("Portuguese", "My sister finished the review and pushed the fix to his own branch.", {"pronoun"},
-           "his own"),
+    sample("Portuguese", "My sister finished the review and pushed the fix to his own branch.", {"pronoun"}, "his own"),
     # Italian: "voglio che tu", dropped subject, "controllare" (check), passato prossimo for a finished action,
     # "essere" as the auxiliary.
     sample("Italian", "I want that you check the logs before the deploy.", {"verb_pattern"}, "want that you"),
     sample("Italian", "Is necessary to update the README after this change.", {"missing_subject"}, "Is necessary"),
-    sample("Italian", "Please control the logs and tell me if there are errors.", {"false_friend", "word_choice"},
-           "control the logs"),
+    sample(
+        "Italian",
+        "Please control the logs and tell me if there are errors.",
+        {"false_friend", "word_choice"},
+        "control the logs",
+    ),
     sample("Italian", "I have done the tests yesterday and they all passed.", {"wrong_tense"}, "have done"),
-    sample("Italian", "The new version is arrived on the server, so we can start the tests.", {"malformed_tense"},
-           "is arrived"),
+    sample(
+        "Italian",
+        "The new version is arrived on the server, so we can start the tests.",
+        {"malformed_tense"},
+        "is arrived",
+    ),
     # Spanish: "depender de", "discutir sobre".
     sample("Spanish", "I depend of the API team to finish this feature.", {"preposition"}, "depend of"),
-    sample("Spanish", "We need to discuss about the design before we write the code.", {"preposition"},
-           "discuss about"),
+    sample(
+        "Spanish", "We need to discuss about the design before we write the code.", {"preposition"}, "discuss about"
+    ),
 )
 
 
 # Without tools, the model would otherwise write the task's tool calls as text, at length. The prompt itself stays as
 # written, so the check grades it unchanged.
-STOP_AFTER_CHECK = ("This is a test of the grammar check alone. After the grammar check, do not carry out the "
-                    "request: reply only with OK.")
+STOP_AFTER_CHECK = (
+    "This is a test of the grammar check alone. After the grammar check, do not carry out the "
+    "request: reply only with OK."
+)
 
 
 def check_of(sample_: Sample) -> Check | None:
@@ -98,15 +130,38 @@ def check_of(sample_: Sample) -> Check | None:
         work = Path(folder) / "work"
         work.mkdir()
         settings = {"pluginConfigs": {"grammar-tracker@inline": {"options": {"native_language": sample_.language}}}}
-        command = [shutil.which("claude") or "claude", "-p", "--plugin-dir", str(ROOT), "--settings",
-                   json.dumps(settings), "--tools", "", "--strict-mcp-config", "--no-session-persistence",
-                   "--max-turns", "1", "--append-system-prompt", STOP_AFTER_CHECK]
+        command = [
+            shutil.which("claude") or "claude",
+            "-p",
+            "--plugin-dir",
+            str(ROOT),
+            "--settings",
+            json.dumps(settings),
+            "--tools",
+            "",
+            "--strict-mcp-config",
+            "--no-session-persistence",
+            "--max-turns",
+            "1",
+            "--append-system-prompt",
+            STOP_AFTER_CHECK,
+        ]
         if model := os.environ.get("GRAMMAR_TRACKER_LIVE_MODEL"):
             command += ["--model", model]
-        env = {**os.environ, "CLAUDE_CODE_PLUGIN_CACHE_DIR": str(Path(folder) / "plugins"),
-               "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "2000"}
-        result = subprocess.run([*command, sample_.prompt], stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                cwd=work, timeout=300, env=env)
+        env = {
+            **os.environ,
+            "CLAUDE_CODE_PLUGIN_CACHE_DIR": str(Path(folder) / "plugins"),
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "2000",
+        }
+        result = subprocess.run(
+            [*command, sample_.prompt],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            cwd=work,
+            timeout=300,
+            env=env,
+        )
         return extract_check(result.stdout)
 
 
@@ -114,7 +169,7 @@ def check_of(sample_: Sample) -> Check | None:
 def checks() -> dict[Sample, Check | None]:
     """The check of every sample, run in parallel."""
     with ThreadPoolExecutor(max_workers=7) as pool:
-        return dict(zip(SAMPLES, pool.map(check_of, SAMPLES)))
+        return dict(zip(SAMPLES, pool.map(check_of, SAMPLES), strict=True))
 
 
 @pytest.mark.parametrize("sample_", SAMPLES, ids=lambda s: f"{s.language}: {s.gone}")
@@ -140,7 +195,7 @@ CLEAN = (
 def clean_checks() -> dict[Sample, Check | None]:
     """The check of every clean prompt, run in parallel."""
     with ThreadPoolExecutor(max_workers=len(CLEAN)) as pool:
-        return dict(zip(CLEAN, pool.map(check_of, CLEAN)))
+        return dict(zip(CLEAN, pool.map(check_of, CLEAN), strict=True))
 
 
 @pytest.mark.parametrize("sample_", CLEAN, ids=lambda s: s.language)

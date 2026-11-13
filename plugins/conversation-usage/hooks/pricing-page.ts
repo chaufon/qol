@@ -17,13 +17,15 @@ const LONG = /\(for prompts (up to|over) ([\d,]+) tokens\)/i
 
 // The lines of the section under `heading` (any level), up to the next heading of the same or a higher level.
 function section(lines: string[], heading: string): string[] {
-  const start = lines.findIndex((l) => /^#+ /.test(l) && l.replace(/^#+ /, '').trim().toLowerCase() === heading.toLowerCase())
+  const start = lines.findIndex(
+    l => /^#+ /.test(l) && l.replace(/^#+ /, '').trim().toLowerCase() === heading.toLowerCase(),
+  )
   if (start === -1) return []
-  const level = lines[start]!.match(/^#+/)![0].length
+  const level = /^#+/.exec(lines[start] ?? '')?.[0].length ?? 0
   const out: string[] = []
   for (const line of lines.slice(start + 1)) {
-    const m = line.match(/^(#+) /)
-    if (m && m[1]!.length <= level) break
+    const hashes = /^(#+) /.exec(line)?.[1]
+    if (hashes !== undefined && hashes.length <= level) break
     out.push(line)
   }
   return out
@@ -31,40 +33,59 @@ function section(lines: string[], heading: string): string[] {
 
 // The body rows of the first table in `lines`, each as its trimmed cells; the header and the rule are left out.
 function firstTable(lines: string[]): string[][] {
-  const start = lines.findIndex((l) => l.trim().startsWith('|'))
+  const start = lines.findIndex(l => l.trim().startsWith('|'))
   if (start === -1) return []
   const rows: string[][] = []
   for (const line of lines.slice(start)) {
     if (!line.trim().startsWith('|')) break
-    rows.push(line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()))
+    rows.push(
+      line
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map(c => c.trim()),
+    )
   }
   return rows.slice(2)
 }
 
 // The model ids a name cell stands for, and the long-context marker it carries, if any.
 function namesOf(cell: string): { ids: string[]; long: { isOver: boolean; above: number } | null } {
-  const marker = LONG.exec(cell)
-  const long = marker ? { isOver: marker[1]!.toLowerCase() === 'over', above: Number(marker[2]!.replaceAll(',', '')) } : null
+  const [, side, count] = LONG.exec(cell) ?? []
+  const long =
+    side !== undefined && count !== undefined
+      ? { isOver: side.toLowerCase() === 'over', above: Number(count.replaceAll(',', '')) }
+      : null
   const ids: string[] = []
   for (const part of cell.split(' / ')) {
     const name = part.replace(/\(.*$/, '').replace(/\s+/g, ' ').trim()
-    const m = NAME.exec(name)
-    if (m) ids.push(`claude-${m[1]!.toLowerCase()}-${m[2]!.replace('.', '-')}`)
+    const [, family, version] = NAME.exec(name) ?? []
+    if (family !== undefined && version !== undefined) {
+      ids.push(`claude-${family.toLowerCase()}-${version.replace('.', '-')}`)
+    }
   }
   return { ids, long }
 }
 
 // The number of a `$N / MTok` cell; null when it holds none.
 function dollars(cell: string): number | null {
-  const m = /\$\s*([\d,]*\.?\d+)/.exec(cell.replace(/<[^>]*>/g, ''))
-  return m ? Number(m[1]!.replaceAll(',', '')) : null
+  const amount = /\$\s*([\d,]*\.?\d+)/.exec(cell.replace(/<[^>]*>/g, ''))?.[1]
+  return amount === undefined ? null : Number(amount.replaceAll(',', ''))
 }
 
 function ratesOf(cells: string[]): Rates | null {
-  const values = cells.slice(1, 6).map(dollars)
-  if (values.length < 5 || values.some((v) => v === null)) return null
-  const [input, cacheWrite5m, cacheWrite1h, cacheRead, output] = values as number[]
-  return { input: input!, cacheWrite5m: cacheWrite5m!, cacheWrite1h: cacheWrite1h!, cacheRead: cacheRead!, output: output! }
+  const [input, cacheWrite5m, cacheWrite1h, cacheRead, output] = cells.slice(1, 6).map(c => dollars(c) ?? undefined)
+  if (
+    input === undefined ||
+    cacheWrite5m === undefined ||
+    cacheWrite1h === undefined ||
+    cacheRead === undefined ||
+    output === undefined
+  ) {
+    return null
+  }
+  return { input, cacheWrite5m, cacheWrite1h, cacheRead, output }
 }
 
 export function parsePricingPage(markdown: string, since: number): PriceRow[] | { error: string } {

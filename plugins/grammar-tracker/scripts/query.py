@@ -8,10 +8,12 @@ Usage:
                                 oldest first
     python3 query.py rekey      store the transcript uuid of saved prompts that have none; prints how many got one
 """
+
 import argparse
 import json
 import sqlite3
 import sys
+from collections.abc import Sequence
 
 from lib import config
 from lib.db import NewerDatabaseError, connect, session_trend, top_mistakes
@@ -20,7 +22,7 @@ from lib.rekey import rekey as rekey_prompts
 from lib.report import occurrence_fields
 
 
-def top(conn, args):
+def top(conn: sqlite3.Connection, args: argparse.Namespace) -> list[dict[str, str | int | None]]:
     return occurrence_fields(top_mistakes(conn, args.limit), config.RECURRING_THRESHOLD)
 
 
@@ -28,11 +30,11 @@ def trend(conn: sqlite3.Connection, args: argparse.Namespace) -> list[int]:
     return session_trend(conn, args.session_id, args.limit)
 
 
-def rekey(conn, args):
+def rekey(conn: sqlite3.Connection, args: argparse.Namespace) -> dict[str, int]:
     return {"rekeyed": rekey_prompts(conn)}
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Print report data from the grammar tracker database as JSON.")
     commands = parser.add_subparsers(required=True, metavar="command")
     top_parser = commands.add_parser("top", help="the most frequent mistakes across all prompts")

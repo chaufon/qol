@@ -3,9 +3,11 @@ import type { Prompt, Request, Tokens } from '../types'
 const TITLE_LENGTH = 100
 const PROMPT_LENGTH = 200
 
-type Json = Record<string, any>
+type Json = Record<string, unknown>
 
-export type TranscriptState = {
+export const isJson = (value: unknown): value is Json => typeof value === 'object' && value !== null
+
+export interface TranscriptState {
   agentId: string | null
   requests: Map<string, Request>
   customTitle: string | null
@@ -31,7 +33,7 @@ const num = (value: unknown): number => (typeof value === 'number' && Number.isF
 
 const tokensOf = (usage: Json): Tokens => {
   const split = usage.cache_creation
-  const hasSplit = split !== null && typeof split === 'object'
+  const hasSplit = isJson(split)
   return {
     input: num(usage.input_tokens),
     cacheWrite5m: hasSplit ? num(split.ephemeral_5m_input_tokens) : num(usage.cache_creation_input_tokens),
@@ -43,11 +45,13 @@ const tokensOf = (usage: Json): Tokens => {
 
 const textOf = (line: Json): string | null => {
   if (line.isMeta === true || line.isCompactSummary === true) return null
-  const content = line.message?.content
+  const content = isJson(line.message) ? line.message.content : undefined
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return null
-  const block = content.find((b: Json) => b?.type === 'text' && typeof b.text === 'string')
-  return block ? block.text : null
+  for (const block of content as unknown[]) {
+    if (isJson(block) && block.type === 'text' && typeof block.text === 'string') return block.text
+  }
+  return null
 }
 
 // The text the person typed; null for meta, command, tool result and interruption lines.
@@ -65,9 +69,10 @@ const ARGS = /<command-args>([^<]*)<\/command-args>/
 // A slash command as typed, `/name args`; null for any other line.
 const commandOf = (line: Json): string | null => {
   const text = textOf(line)
-  const name = text === null ? undefined : COMMAND.exec(text)?.[1]?.trim()
+  if (text === null) return null
+  const name = COMMAND.exec(text)?.[1]?.trim()
   if (!name) return null
-  const args = ARGS.exec(text!)?.[1]?.trim()
+  const args = ARGS.exec(text)?.[1]?.trim()
   return args ? `${name} ${args}` : name
 }
 
@@ -75,13 +80,14 @@ const firstLine = (text: string, length: number): string => (text.trim().split('
 
 const addRequest = (state: TranscriptState, line: Json, at: number): void => {
   const message = line.message
-  if (typeof message?.id !== 'string' || typeof line.requestId !== 'string') return
-  if (!message.usage || typeof message.usage !== 'object') return
+  if (!isJson(message) || typeof message.id !== 'string' || typeof line.requestId !== 'string') return
+  const usage = message.usage
+  if (!isJson(usage)) return
   if (typeof message.model !== 'string' || message.model === '<synthetic>') return
 
   const key = `${message.id}|${line.requestId}`
   let request = state.requests.get(key)
-  const tokens = tokensOf(message.usage)
+  const tokens = tokensOf(usage)
   if (!request) {
     request = {
       messageId: message.id,
@@ -89,7 +95,7 @@ const addRequest = (state: TranscriptState, line: Json, at: number): void => {
       agentId: state.agentId,
       at,
       model: message.model,
-      isFast: message.usage.speed === 'fast',
+      isFast: usage.speed === 'fast',
       tokens,
       tools: [],
       toolUseIds: [],
@@ -100,8 +106,8 @@ const addRequest = (state: TranscriptState, line: Json, at: number): void => {
   }
 
   if (Array.isArray(message.content)) {
-    for (const block of message.content) {
-      if (block?.type !== 'tool_use') continue
+    for (const block of message.content as unknown[]) {
+      if (!isJson(block) || block.type !== 'tool_use') continue
       if (typeof block.name === 'string' && !request.tools.includes(block.name)) request.tools.push(block.name)
       if (typeof block.id === 'string' && !request.toolUseIds.includes(block.id)) request.toolUseIds.push(block.id)
     }
@@ -111,13 +117,13 @@ const addRequest = (state: TranscriptState, line: Json, at: number): void => {
 export const feed = (state: TranscriptState, lines: string[]): void => {
   for (const raw of lines) {
     if (raw.trim() === '') continue
-    let line: Json
+    let line: unknown
     try {
       line = JSON.parse(raw)
     } catch {
       continue
     }
-    if (line === null || typeof line !== 'object') continue
+    if (!isJson(line)) continue
 
     const at = typeof line.timestamp === 'string' ? Date.parse(line.timestamp) : NaN
     if (state.startedAt === null && Number.isFinite(at)) state.startedAt = at
@@ -141,7 +147,8 @@ export const requestsOf = (state: TranscriptState): Request[] => [...state.reque
 
 export const promptsOf = (state: TranscriptState): Prompt[] => [...state.prompts]
 
-export const titleOf = (state: TranscriptState): string | null => state.customTitle ?? state.aiTitle ?? state.firstPrompt
+export const titleOf = (state: TranscriptState): string | null =>
+  state.customTitle ?? state.aiTitle ?? state.firstPrompt
 
 export const cwdOf = (state: TranscriptState): string | null => state.cwd
 
@@ -156,7 +163,7 @@ export const completeLines = (chunk: string): { lines: string[]; rest: string } 
 export const utf8Length = (text: string): number => {
   let bytes = 0
   for (const char of text) {
-    const code = char.codePointAt(0)!
+    const code = char.codePointAt(0) ?? 0
     bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4
   }
   return bytes

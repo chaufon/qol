@@ -1,8 +1,18 @@
 import { expect, test } from 'claude-code/testing'
 
-import { completeLines, cwdOf, feed, newTranscript, promptsOf, requestsOf, startedOf, titleOf, utf8Length } from './transcript'
+import {
+  completeLines,
+  cwdOf,
+  feed,
+  newTranscript,
+  promptsOf,
+  requestsOf,
+  startedOf,
+  titleOf,
+  utf8Length,
+} from './transcript'
 
-type Opts = {
+interface Opts {
   id?: string
   requestId?: string
   output?: number
@@ -12,7 +22,15 @@ type Opts = {
   usage?: Record<string, unknown>
 }
 
-const assistant = ({ id = 'msg_1', requestId = 'req_1', output = 1, tools = [], at = '2026-10-28T10:00:00.000Z', model = 'claude-opus-5', usage }: Opts = {}) =>
+const assistant = ({
+  id = 'msg_1',
+  requestId = 'req_1',
+  output = 1,
+  tools = [],
+  at = '2026-10-28T10:00:00.000Z',
+  model = 'claude-opus-5',
+  usage,
+}: Opts = {}) =>
   JSON.stringify({
     type: 'assistant',
     requestId,
@@ -21,7 +39,12 @@ const assistant = ({ id = 'msg_1', requestId = 'req_1', output = 1, tools = [], 
     message: {
       id,
       model,
-      usage: usage ?? { input_tokens: 3, cache_creation_input_tokens: 7, cache_read_input_tokens: 5, output_tokens: output },
+      usage: usage ?? {
+        input_tokens: 3,
+        cache_creation_input_tokens: 7,
+        cache_read_input_tokens: 5,
+        output_tokens: output,
+      },
       content: tools.map((name, i) => ({ type: 'tool_use', id: `toolu_${name}_${i}`, name })),
     },
   })
@@ -62,8 +85,12 @@ test('the same request fed in two calls stays one request', () => {
 
 test('requests keep the order of first appearance', () => {
   const state = newTranscript(null)
-  feed(state, [assistant({ id: 'msg_1', requestId: 'req_1' }), assistant({ id: 'msg_2', requestId: 'req_2' }), assistant({ id: 'msg_1', requestId: 'req_1', output: 9 })])
-  expect(requestsOf(state).map((r) => r.messageId)).toEqual(['msg_1', 'msg_2'])
+  feed(state, [
+    assistant({ id: 'msg_1', requestId: 'req_1' }),
+    assistant({ id: 'msg_2', requestId: 'req_2' }),
+    assistant({ id: 'msg_1', requestId: 'req_1', output: 9 }),
+  ])
+  expect(requestsOf(state).map(r => r.messageId)).toEqual(['msg_1', 'msg_2'])
 })
 
 test('cache_creation splits the cache write into 5m and 1h', () => {
@@ -139,7 +166,11 @@ test('cwdOf and startedOf come from the first lines that have them', () => {
   const state = newTranscript(null)
   expect(cwdOf(state)).toBe(null)
   expect(startedOf(state)).toBe(null)
-  feed(state, [lineOf({ type: 'ai-title', aiTitle: 'A' }), assistant({ at: '2026-10-28T10:00:00.000Z' }), assistant({ id: 'msg_2', requestId: 'req_2', at: '2026-10-28T11:00:00.000Z' })])
+  feed(state, [
+    lineOf({ type: 'ai-title', aiTitle: 'A' }),
+    assistant({ at: '2026-10-28T10:00:00.000Z' }),
+    assistant({ id: 'msg_2', requestId: 'req_2', at: '2026-10-28T11:00:00.000Z' }),
+  ])
   expect(cwdOf(state)).toBe('/work/app')
   expect(startedOf(state)).toBe(Date.parse('2026-10-28T10:00:00.000Z'))
 })
@@ -166,7 +197,11 @@ test('prompts and slash commands of the main transcript are kept with their time
     user([{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }]),
     user([{ type: 'text', text: '[Request interrupted by user]' }]),
     user('<local-command-caveat>x</local-command-caveat>', { isMeta: true }),
-    user('<command-name>/code-review</command-name>\n<command-message>code-review</command-message>\n<command-args>high</command-args>', {}, '2026-10-28T10:05:00.000Z'),
+    user(
+      '<command-name>/code-review</command-name>\n<command-message>code-review</command-message>\n<command-args>high</command-args>',
+      {},
+      '2026-10-28T10:05:00.000Z',
+    ),
     user('<command-name>/clear</command-name>\n<command-args></command-args>'),
     user('Summary of the conversation', { isCompactSummary: true }),
   ])

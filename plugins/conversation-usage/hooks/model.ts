@@ -1,4 +1,13 @@
-import type { Conversation, Grouping, HistoryConversation, HistoryData, Request, Subagent, Usage, Window } from '../types'
+import type {
+  Conversation,
+  Grouping,
+  HistoryConversation,
+  HistoryData,
+  Request,
+  Subagent,
+  Usage,
+  Window,
+} from '../types'
 import { dayLabel, hhmm, projectColor, projectLabel, weekday } from './format'
 import { addCosts, addTokens, costOf, ZERO_TOKENS } from './prices'
 
@@ -6,15 +15,30 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 const EMPTY: Usage = { tokens: ZERO_TOKENS, cost: null }
 
-const addUsage = (a: Usage, b: Usage): Usage => ({ tokens: addTokens(a.tokens, b.tokens), cost: addCosts(a.cost, b.cost) })
+const addUsage = (a: Usage, b: Usage): Usage => ({
+  tokens: addTokens(a.tokens, b.tokens),
+  cost: addCosts(a.cost, b.cost),
+})
 
 // Requests with an unknown model add tokens but no cost; the cost is null when no request has a known price.
 export const sumUsage = (rs: Request[]): Usage =>
-  rs.reduce<Usage>((acc, r) => ({ tokens: addTokens(acc.tokens, r.tokens), cost: addCosts(acc.cost, costOf(r)) }), EMPTY)
+  rs.reduce<Usage>(
+    (acc, r) => ({ tokens: addTokens(acc.tokens, r.tokens), cost: addCosts(acc.cost, costOf(r)) }),
+    EMPTY,
+  )
 
 export type Row =
   | { kind: 'request'; key: string; number: number; depth: number; at: number; tools: string[]; usage: Usage }
-  | { kind: 'subagent'; key: string; agentId: string; name: string; depth: number; count: number; isOpen: boolean; usage: Usage }
+  | {
+      kind: 'subagent'
+      key: string
+      agentId: string
+      name: string
+      depth: number
+      count: number
+      isOpen: boolean
+      usage: Usage
+    }
 
 // The rows of one conversation: its main requests, each followed by the subagents it launched.
 // An open subagent lists its own requests one level deeper.
@@ -26,18 +50,29 @@ export const conversationRows = (
 ): Row[] => {
   const inRange = (r: Request) => !range || (range[0] <= r.at && r.at < range[1])
   const requestsOf = (agentId: string | null) =>
-    c.requests.filter((r) => r.agentId === agentId && inRange(r)).sort((a, b) => a.at - b.at)
+    c.requests.filter(r => r.agentId === agentId && inRange(r)).sort((a, b) => a.at - b.at)
   const children = (agentId: string | null) =>
-    c.subagents.filter((s) => s.parentAgentId === agentId && (!range || requestsOf(s.agentId).length > 0 || hasKids(s.agentId)))
+    c.subagents.filter(
+      s => s.parentAgentId === agentId && (!range || requestsOf(s.agentId).length > 0 || hasKids(s.agentId)),
+    )
   const hasKids = (agentId: string): boolean =>
-    c.subagents.some((s) => s.parentAgentId === agentId && (requestsOf(s.agentId).length > 0 || hasKids(s.agentId)))
+    c.subagents.some(s => s.parentAgentId === agentId && (requestsOf(s.agentId).length > 0 || hasKids(s.agentId)))
 
   const rows: Row[] = []
   const subRows = (s: Subagent, depth: number) => {
     const rs = requestsOf(s.agentId)
     const key = `${prefix}sub:${s.agentId}`
     const open = isOpen(key)
-    rows.push({ kind: 'subagent', key, agentId: s.agentId, name: s.name, depth, count: rs.length, isOpen: open, usage: sumUsage(rs) })
+    rows.push({
+      kind: 'subagent',
+      key,
+      agentId: s.agentId,
+      name: s.name,
+      depth,
+      count: rs.length,
+      isOpen: open,
+      usage: sumUsage(rs),
+    })
     if (open) context(s.agentId, depth + 1)
   }
   const context = (agentId: string | null, depth: number) => {
@@ -45,8 +80,13 @@ export const conversationRows = (
     const kids = children(agentId)
     requestsOf(agentId).forEach((r, i) => {
       rows.push({
-        kind: 'request', key: `${prefix}req:${r.messageId}|${r.requestId}`, number: i + 1, depth, at: r.at,
-        tools: r.tools, usage: sumUsage([r]),
+        kind: 'request',
+        key: `${prefix}req:${r.messageId}|${r.requestId}`,
+        number: i + 1,
+        depth,
+        at: r.at,
+        tools: r.tools,
+        usage: sumUsage([r]),
       })
       for (const id of r.toolUseIds) {
         for (const s of kids) {
@@ -63,8 +103,15 @@ export const conversationRows = (
   return rows
 }
 
-export type PromptGroup = {
-  key: string; number: number; at: number | null; text: string; count: number; isOpen: boolean; usage: Usage; rows: Row[]
+export interface PromptGroup {
+  key: string
+  number: number
+  at: number | null
+  text: string
+  count: number
+  isOpen: boolean
+  usage: Usage
+  rows: Row[]
 }
 
 // The requests of a conversation grouped by the prompt that started them; null when it has no prompts.
@@ -80,11 +127,15 @@ export const promptGroups = (
   range: [number, number] | undefined,
   isLastOpen: boolean,
 ): PromptGroup[] | null => {
-  const prompts = [...(c.prompts ?? [])].sort((a, b) => a.at - b.at)
+  // A conversation kept in the mod's state across a reload can predate the `prompts` field.
+  const stored: Partial<Pick<Conversation, 'prompts'>> = c
+  const prompts = [...(stored.prompts ?? [])].sort((a, b) => a.at - b.at)
   if (prompts.length === 0) return null
   const groupAt = (at: number): number => {
     let g = 0
-    prompts.forEach((p, i) => { if (p.at <= at) g = i + 1 })
+    prompts.forEach((p, i) => {
+      if (p.at <= at) g = i + 1
+    })
     return g
   }
   const groupOfRequest = new Map<Request, number>()
@@ -95,13 +146,13 @@ export const promptGroups = (
     groupOfRequest.set(r, g)
     for (const id of r.toolUseIds) launcher.set(id, g)
   }
-  const firstAt = (agentId: string): number => Math.min(...c.requests.filter((r) => r.agentId === agentId).map((r) => r.at))
+  const firstAt = (agentId: string): number => Math.min(...c.requests.filter(r => r.agentId === agentId).map(r => r.at))
   const agentGroup = new Map<string, number>()
   const groupOfAgent = (s: Subagent, seen: Set<string> = new Set()): number => {
     const known = agentGroup.get(s.agentId)
     if (known !== undefined) return known
     let g: number | undefined = s.toolUseId === null ? undefined : launcher.get(s.toolUseId)
-    const parent = c.subagents.find((p) => p.agentId === s.parentAgentId)
+    const parent = c.subagents.find(p => p.agentId === s.parentAgentId)
     if (g === undefined && parent && !seen.has(parent.agentId)) g = groupOfAgent(parent, seen.add(s.agentId))
     if (g === undefined) {
       const at = firstAt(s.agentId)
@@ -117,16 +168,22 @@ export const promptGroups = (
   const groups: PromptGroup[] = []
   let number = 0
   for (let g = 0; g <= prompts.length; g++) {
-    const requests = c.requests.filter((r) => groupOfRequest.get(r) === g)
+    const requests = c.requests.filter(r => groupOfRequest.get(r) === g)
     if (g > 0 && requests.length > 0) number++
     const shown = requests.filter(inRange)
     if (shown.length === 0) continue
-    const part: Conversation = { ...c, requests, subagents: c.subagents.filter((s) => agentGroup.get(s.agentId) === g) }
+    const part: Conversation = { ...c, requests, subagents: c.subagents.filter(s => agentGroup.get(s.agentId) === g) }
     const key = `${prefix}prompt:${g}`
-    const prompt = g === 0 ? null : prompts[g - 1]!
+    const prompt = g === 0 ? null : (prompts[g - 1] ?? null)
     groups.push({
-      key, number: g === 0 ? 0 : number, at: prompt?.at ?? null, text: prompt?.text ?? 'Before the first prompt', count: shown.length,
-      isOpen: false, usage: sumUsage(shown), rows: conversationRows(part, (k) => isOpen(k) ?? false, prefix, range),
+      key,
+      number: g === 0 ? 0 : number,
+      at: prompt?.at ?? null,
+      text: prompt?.text ?? 'Before the first prompt',
+      count: shown.length,
+      isOpen: false,
+      usage: sumUsage(shown),
+      rows: conversationRows(part, k => isOpen(k) ?? false, prefix, range),
     })
   }
   groups.forEach((group, i) => {
@@ -135,7 +192,7 @@ export const promptGroups = (
   return groups
 }
 
-export type Node = {
+export interface Node {
   key: string
   kind: 'day' | 'project' | 'week' | 'fiveHour' | 'conversation'
   label: string
@@ -172,7 +229,7 @@ const groupBy = <T>(items: T[], keyOf: (t: T) => string): Map<string, T[]> => {
   return out
 }
 
-const latest = (cs: HistoryConversation[]): number => Math.max(...cs.map((c) => c.startedAt))
+const latest = (cs: HistoryConversation[]): number => Math.max(...cs.map(c => c.startedAt))
 
 export const historyTree = (
   h: HistoryData,
@@ -182,36 +239,73 @@ export const historyTree = (
 ): Node[] => {
   // fresh: inside the first top-level node, where groups default to open.
   const group = (
-    key: string, kind: Node['kind'], label: string, fresh: boolean, children: Node[],
+    key: string,
+    kind: Node['kind'],
+    label: string,
+    fresh: boolean,
+    children: Node[],
     extra: Partial<Node> = {},
   ): Node => ({
-    key, kind, label, usage: children.reduce((u, c) => addUsage(u, c.usage), EMPTY), count: children.length,
-    isOpen: expanded[key] ?? fresh, color: null, isNow: false, isContinued: false, conversationId: null,
-    range: null, startedAt: null, children, ...extra,
+    key,
+    kind,
+    label,
+    usage: children.reduce((u, c) => addUsage(u, c.usage), EMPTY),
+    count: children.length,
+    isOpen: expanded[key] ?? fresh,
+    color: null,
+    isNow: false,
+    isContinued: false,
+    conversationId: null,
+    range: null,
+    startedAt: null,
+    children,
+    ...extra,
   })
   const convNode = (
-    key: string, c: HistoryConversation, usage: Usage, count: number, extra: Partial<Node> = {},
+    key: string,
+    c: HistoryConversation,
+    usage: Usage,
+    count: number,
+    extra: Partial<Node> = {},
   ): Node => ({
-    key, kind: 'conversation', label: c.title, usage, count, isOpen: expanded[key] ?? false, color: null,
-    isNow: false, isContinued: false, conversationId: c.id, range: null, startedAt: c.startedAt, children: [],
+    key,
+    kind: 'conversation',
+    label: c.title,
+    usage,
+    count,
+    isOpen: expanded[key] ?? false,
+    color: null,
+    isNow: false,
+    isContinued: false,
+    conversationId: c.id,
+    range: null,
+    startedAt: c.startedAt,
+    children: [],
     ...extra,
   })
   const newestFirst = (cs: HistoryConversation[]) => [...cs].sort((a, b) => b.startedAt - a.startedAt)
   const leaves = (parent: string, cs: HistoryConversation[]) =>
-    newestFirst(cs).map((c) => convNode(`${parent}/conv:${c.id}`, c, c.usage, c.requestCount))
-  const byLatest = <T>(m: Map<string, HistoryConversation[]>, build: (k: string, cs: HistoryConversation[]) => T): T[] =>
-    [...m.entries()].sort((a, b) => latest(b[1]) - latest(a[1])).map(([k, cs]) => build(k, cs))
+    newestFirst(cs).map(c => convNode(`${parent}/conv:${c.id}`, c, c.usage, c.requestCount))
+  const byLatest = <T>(
+    m: Map<string, HistoryConversation[]>,
+    build: (k: string, cs: HistoryConversation[]) => T,
+  ): T[] => [...m.entries()].sort((a, b) => latest(b[1]) - latest(a[1])).map(([k, cs]) => build(k, cs))
 
   const dayNodes = (parent: string, cs: HistoryConversation[], fresh: boolean): Node[] =>
-    byLatest(groupBy(cs, (c) => dayKey(c.startedAt)), (k, list) =>
-      group(`${parent}day:${k}`, 'day', dayLabel(latest(list), now), fresh,
-        leaves(`${parent}day:${k}`, list)))
+    byLatest(
+      groupBy(cs, c => dayKey(c.startedAt)),
+      (k, list) =>
+        group(`${parent}day:${k}`, 'day', dayLabel(latest(list), now), fresh, leaves(`${parent}day:${k}`, list)),
+    )
   const projectNodes = (parent: string, cs: HistoryConversation[], fresh: boolean, inner: boolean): Node[] =>
-    byLatest(groupBy(cs, (c) => c.project), (path, list) => {
-      const key = `${parent}project:${path}`
-      const kids = inner ? dayNodes(`${key}/`, list, fresh) : leaves(key, list)
-      return group(key, 'project', projectLabel(path), fresh, kids, { color: projectColor(path) })
-    })
+    byLatest(
+      groupBy(cs, c => c.project),
+      (path, list) => {
+        const key = `${parent}project:${path}`
+        const kids = inner ? dayNodes(`${key}/`, list, fresh) : leaves(key, list)
+        return group(key, 'project', projectLabel(path), fresh, kids, { color: projectColor(path) })
+      },
+    )
 
   // The first top-level node is open together with its groups; build it fresh, the rest closed.
   const openFirst = (build: (fresh: boolean) => Node[]): Node[] => {
@@ -221,29 +315,35 @@ export const historyTree = (
   }
 
   if (grouping === 'date') {
-    return openFirst((fresh) =>
-      byLatest(groupBy(h.conversations, (c) => dayKey(c.startedAt)), (k, list) => {
-        const key = `day:${k}`
-        return group(key, 'day', dayLabel(latest(list), now), fresh, projectNodes(`${key}/`, list, fresh, false))
-      }),
+    return openFirst(fresh =>
+      byLatest(
+        groupBy(h.conversations, c => dayKey(c.startedAt)),
+        (k, list) => {
+          const key = `day:${k}`
+          return group(key, 'day', dayLabel(latest(list), now), fresh, projectNodes(`${key}/`, list, fresh, false))
+        },
+      ),
     )
   }
-  if (grouping === 'project') return openFirst((fresh) => projectNodes('', h.conversations, fresh, true))
+  if (grouping === 'project') return openFirst(fresh => projectNodes('', h.conversations, fresh, true))
 
-  const byId = new Map(h.conversations.map((c) => [c.id, c]))
+  const byId = new Map(h.conversations.map(c => [c.id, c]))
   const isNow = (w: Window) => w.start <= now && now < w.end
-  const sorted = (kind: Window['kind']) => h.windows.filter((w) => w.kind === kind).sort((a, b) => b.start - a.start)
+  const sorted = (kind: Window['kind']) => h.windows.filter(w => w.kind === kind).sort((a, b) => b.start - a.start)
   const fiveHourNode = (parent: string, w: Window, fresh: boolean): Node => {
     const key = `${parent}fiveHour:${w.start}`
     const kids: Node[] = []
     for (const s of h.slices) {
       const c = byId.get(s.conversationId)
       if (s.kind !== 'five_hour' || s.windowStart !== w.start || !c) continue
-      kids.push(convNode(`${key}/conv:${c.id}`, c, s.usage, s.requestCount, {
-        range: [w.start, w.end], isContinued: c.startedAt < w.start,
-      }))
+      kids.push(
+        convNode(`${key}/conv:${c.id}`, c, s.usage, s.requestCount, {
+          range: [w.start, w.end],
+          isContinued: c.startedAt < w.start,
+        }),
+      )
     }
-    kids.sort((a, b) => b.startedAt! - a.startedAt!)
+    kids.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
     return group(key, 'fiveHour', `5-hour · ${hhmm(w.start)}–${hhmm(w.end)}`, fresh, kids, { isNow: isNow(w) })
   }
   const weeks = sorted('seven_day')
@@ -253,13 +353,17 @@ export const historyTree = (
     const nodes: Node[] = weeks.map((w, i) => {
       const key = `week:${w.start}`
       const open = fresh && i === 0
-      const fiveHours = fives.filter((f) => inWeek(f, w)).map((f) => fiveHourNode(`${key}/`, f, open))
+      const fiveHours = fives.filter(f => inWeek(f, w)).map(f => fiveHourNode(`${key}/`, f, open))
       const usage = h.slices
-        .filter((s) => s.kind === 'seven_day' && s.windowStart === w.start)
+        .filter(s => s.kind === 'seven_day' && s.windowStart === w.start)
         .reduce((u, s) => addUsage(u, s.usage), EMPTY)
-      return group(key, 'week', `7-day window · ${dateText(w.start)} → ${dateText(w.end)}`, open, fiveHours, { isNow: isNow(w), usage })
+      return group(key, 'week', `7-day window · ${dateText(w.start)} → ${dateText(w.end)}`, open, fiveHours, {
+        isNow: isNow(w),
+        usage,
+      })
     })
-    for (const f of fives) if (!weeks.some((w) => inWeek(f, w))) nodes.push(fiveHourNode('', f, fresh && nodes.length === 0))
+    for (const f of fives)
+      if (!weeks.some(w => inWeek(f, w))) nodes.push(fiveHourNode('', f, fresh && nodes.length === 0))
     return nodes
   }
   return build(true)

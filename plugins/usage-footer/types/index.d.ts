@@ -1,4 +1,4 @@
-export type Snapshot = {
+export interface Snapshot {
   contextTokens: number | null
   // The size is the count /context shows, not one Claude's servers measured.
   isEstimate: boolean

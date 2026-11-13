@@ -40,7 +40,7 @@ export const hhmm = (ms: number): string => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-export const weekday = (ms: number): string => WEEKDAYS[new Date(ms).getDay()]!
+export const weekday = (ms: number): string => WEEKDAYS[new Date(ms).getDay()] ?? ''
 
 export const dayLabel = (ms: number, now: number): string => {
   const d = new Date(ms)
@@ -64,5 +64,5 @@ export const projectColor = (path: string): string => {
     h ^= path.charCodeAt(i)
     h = Math.imul(h, 0x01000193) >>> 0
   }
-  return PROJECT_PALETTE[h % PROJECT_PALETTE.length]!
+  return PROJECT_PALETTE[h % PROJECT_PALETTE.length] ?? ''
 }

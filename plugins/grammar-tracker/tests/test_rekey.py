@@ -19,8 +19,15 @@ def write(projects, session, entries):
 
 
 def save(conn, turn, original, created_at, session="s1"):
-    save_check(conn, turn_id=turn, session_id=session, created_at=created_at, project_dir="/p", original=original,
-               check=Check(input_mode="typed", corrected_prompt="c", mistakes=[]))
+    save_check(
+        conn,
+        turn_id=turn,
+        session_id=session,
+        created_at=created_at,
+        project_dir="/p",
+        original=original,
+        check=Check(input_mode="typed", corrected_prompt="c", mistakes=[]),
+    )
 
 
 def uuids(conn):
@@ -29,8 +36,16 @@ def uuids(conn):
 
 def test_rekey_takes_the_entry_with_the_same_text_and_the_closest_time(tmp_path):
     projects = tmp_path / "projects"
-    write(projects, "s1", [at("u1", "fix it", "2026-10-17T12:00:00.000Z"), assistant("a1", "ok"),
-                           at("u2", "fix it", "2026-10-17T12:05:00.000Z"), at("u3", "other", "2026-10-17T12:05:01.000Z")])
+    write(
+        projects,
+        "s1",
+        [
+            at("u1", "fix it", "2026-10-17T12:00:00.000Z"),
+            assistant("a1", "ok"),
+            at("u2", "fix it", "2026-10-17T12:05:00.000Z"),
+            at("u3", "other", "2026-10-17T12:05:01.000Z"),
+        ],
+    )
     conn = connect(tmp_path / "g.db")
     save(conn, "t1", "fix it", "2026-10-17T12:05:00.400Z")
     assert rekey(conn, projects) == 1
@@ -39,7 +54,9 @@ def test_rekey_takes_the_entry_with_the_same_text_and_the_closest_time(tmp_path)
 
 def test_rekey_gives_two_prompts_with_the_same_text_their_own_entries(tmp_path):
     projects = tmp_path / "projects"
-    write(projects, "s1", [at("u1", "fix it", "2026-10-17T12:00:00.000Z"), at("u2", "fix it", "2026-10-17T12:05:00.000Z")])
+    write(
+        projects, "s1", [at("u1", "fix it", "2026-10-17T12:00:00.000Z"), at("u2", "fix it", "2026-10-17T12:05:00.000Z")]
+    )
     conn = connect(tmp_path / "g.db")
     save(conn, "t1", "fix it", "2026-10-17T12:00:00.500Z")
     save(conn, "t2", "fix it", "2026-10-17T12:05:00.500Z")
@@ -66,8 +83,16 @@ def test_rekey_keeps_the_uuid_of_old_rows(tmp_path):
     projects = tmp_path / "projects"
     write(projects, "s1", [at("u9", "fix it", "2026-10-17T12:00:00.000Z")])
     conn = connect(tmp_path / "g.db")
-    save_check(conn, turn_id=None, prompt_uuid="old", session_id="s1", created_at="2026-10-17T12:00:00Z",
-               project_dir="/p", original="fix it", check=Check(input_mode="typed", corrected_prompt="c", mistakes=[]))
+    save_check(
+        conn,
+        turn_id=None,
+        prompt_uuid="old",
+        session_id="s1",
+        created_at="2026-10-17T12:00:00Z",
+        project_dir="/p",
+        original="fix it",
+        check=Check(input_mode="typed", corrected_prompt="c", mistakes=[]),
+    )
     assert rekey(conn, projects) == 0
     assert uuids(conn) == [(None, "old")]
 
@@ -78,7 +103,11 @@ def test_query_rekey_command(tmp_path):
     conn = connect(tmp_path / "grammar.db")
     save(conn, "t1", "fix it", "2026-10-17T12:00:00.000Z")
     conn.close()
-    result = subprocess.run([sys.executable, ROOT / "scripts" / "query.py", "rekey"], capture_output=True, text=True,
-                            env=script_env(tmp_path, CLAUDE_PLUGIN_DATA=str(tmp_path),
-                                           CLAUDE_CONFIG_DIR=str(config_dir)), cwd=tmp_path)
+    result = subprocess.run(
+        [sys.executable, ROOT / "scripts" / "query.py", "rekey"],
+        capture_output=True,
+        text=True,
+        env=script_env(tmp_path, CLAUDE_PLUGIN_DATA=str(tmp_path), CLAUDE_CONFIG_DIR=str(config_dir)),
+        cwd=tmp_path,
+    )
     assert (result.returncode, json.loads(result.stdout)) == (0, {"rekeyed": 1}), result.stderr

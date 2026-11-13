@@ -1,13 +1,27 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { Conversation, Request, Subagent } from '../types'
-import { completeLines, cwdOf, feed, newTranscript, promptsOf, requestsOf, startedOf, titleOf, utf8Length } from './transcript'
+import {
+  completeLines,
+  cwdOf,
+  feed,
+  isJson,
+  newTranscript,
+  promptsOf,
+  requestsOf,
+  startedOf,
+  titleOf,
+  utf8Length,
+} from './transcript'
 import type { TranscriptState } from './transcript'
 
-type Cursor = { offset: number; state: TranscriptState }
+interface Cursor {
+  offset: number
+  state: TranscriptState
+}
 type Known = Cursor & { name: string; toolUseId: string | null }
 
-export type Reader = {
+export interface Reader {
   conversationId: string | null
   path: string | null
   main: Cursor
@@ -37,7 +51,7 @@ async function run($: EngineInterface, argv: string[]) {
   }
 }
 
-const lines = (stdout: string): string[] => stdout.split('\n').filter((line) => line !== '')
+const lines = (stdout: string): string[] => stdout.split('\n').filter(line => line !== '')
 
 // Feeds the bytes appended to `path` since the cursor into its state. False when a read failed.
 async function advance($: EngineInterface, path: string, cursor: Cursor): Promise<boolean> {
@@ -87,14 +101,14 @@ async function syncSubagents($: EngineInterface, reader: Reader, dir: string): P
       if (agentId === undefined || reader.subagents.has(agentId)) continue
       const content = await run($, ['cat', file])
       if (content === null) continue
-      let meta: Record<string, unknown>
+      let meta: unknown
       try {
         meta = JSON.parse(content.stdout)
       } catch {
         continue
       }
-      if (meta === null || typeof meta !== 'object') continue
-      const name = [meta.description, meta.agentType].find((v) => typeof v === 'string' && v !== '') as string | undefined
+      if (!isJson(meta)) continue
+      const name = [meta.description, meta.agentType].find(v => typeof v === 'string' && v !== '') as string | undefined
       reader.subagents.set(agentId, {
         offset: 0,
         state: newTranscript(agentId),

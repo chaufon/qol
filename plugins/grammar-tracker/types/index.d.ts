@@ -1,4 +1,4 @@
-export type Occurrence = {
+export interface Occurrence {
   type: string
   typeLabel: string
   typeDescription: string
@@ -12,18 +12,21 @@ export type Occurrence = {
 }
 
 export type GrammarCheck =
-  | { doesNotApply: true }
-  | { doesNotApply: false; correctedPrompt: string; occurrences: Occurrence[] }
+  { doesNotApply: true } | { doesNotApply: false; correctedPrompt: string; occurrences: Occurrence[] }
 
 export type PaneTab = 'last' | 'top'
 
-// The Top mistakes tab: null while query.py runs, the mistakes it returned, or the error it failed with.
+/** The Top mistakes tab: null while query.py runs, the mistakes it returned, or the error it failed with. */
 export type TopMistakes = { mistakes: Occurrence[] } | { error: string } | null
 
 declare module 'claude-code' {
   interface PluginState {
     'grammar-tracker': {
-      last: GrammarCheck | null; isOpen: boolean; tab: PaneTab; top: TopMistakes; openRow: string | null
+      last: GrammarCheck | null
+      isOpen: boolean
+      tab: PaneTab
+      top: TopMistakes
+      openRow: string | null
       // The mistake count of each of the last prompts of this conversation, oldest first; null until loaded.
       trend: number[] | null
       // True from the start of a turn until its check arrives or the turn ends.

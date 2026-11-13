@@ -1,12 +1,27 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Request } from '../types'
-import { quote, repriceRequests, toPrompt, toRequest, toUsage, upsertConversation, upsertPrompts, upsertRequests } from './sql'
+import {
+  quote,
+  repriceRequests,
+  toPrompt,
+  toRequest,
+  toUsage,
+  upsertConversation,
+  upsertPrompts,
+  upsertRequests,
+} from './sql'
 
 const request = (model: string): Request => ({
-  messageId: 'm1', requestId: 'r1', agentId: null, at: 1000, model, isFast: false,
+  messageId: 'm1',
+  requestId: 'r1',
+  agentId: null,
+  at: 1000,
+  model,
+  isFast: false,
   tokens: { input: 1, cacheWrite5m: 2, cacheWrite1h: 3, cacheRead: 4, output: 5 },
-  tools: ['Read'], toolUseIds: ['t1'],
+  tools: ['Read'],
+  toolUseIds: ['t1'],
 })
 
 test('quote doubles single quotes', () => {
@@ -41,14 +56,30 @@ test('no rows give no statement', () => {
 })
 
 test('the conversation upsert quotes its text', () => {
-  const sql = upsertConversation({ id: 'c1', project: "/a/it's", title: 't', startedAt: 5, requests: [], subagents: [], prompts: [] })
+  const sql = upsertConversation({
+    id: 'c1',
+    project: "/a/it's",
+    title: 't',
+    startedAt: 5,
+    requests: [],
+    subagents: [],
+    prompts: [],
+  })
   expect(sql).toContain("'/a/it''s'")
 })
 
 test('toUsage gives a null cost when no request has a price', () => {
   const usage = toUsage({
-    input: 1, cache_write_5m: 2, cache_write_1h: 3, cache_read: 4, output: 5,
-    cost_input: null, cost_cache_write: null, cost_cache_read: null, cost_output: null, cost_count: 0,
+    input: 1,
+    cache_write_5m: 2,
+    cache_write_1h: 3,
+    cache_read: 4,
+    output: 5,
+    cost_input: null,
+    cost_cache_write: null,
+    cost_cache_read: null,
+    cost_output: null,
+    cost_count: 0,
   })
   expect(usage.cost).toBe(null)
   expect(usage.tokens.cacheWrite1h).toBe(3)
@@ -56,17 +87,35 @@ test('toUsage gives a null cost when no request has a price', () => {
 
 test('toUsage sums the cost parts into a total', () => {
   const usage = toUsage({
-    input: 0, cache_write_5m: 0, cache_write_1h: 0, cache_read: 0, output: 0,
-    cost_input: 1, cost_cache_write: 2, cost_cache_read: 3, cost_output: 4, cost_count: 2,
+    input: 0,
+    cache_write_5m: 0,
+    cache_write_1h: 0,
+    cache_read: 0,
+    output: 0,
+    cost_input: 1,
+    cost_cache_write: 2,
+    cost_cache_read: 3,
+    cost_output: 4,
+    cost_count: 2,
   })
   expect(usage.cost).toEqual({ input: 1, cacheWrite: 2, cacheRead: 3, output: 4, total: 10 })
 })
 
 test('toRequest parses the JSON arrays', () => {
   const r = toRequest({
-    message_id: 'm1', request_id: 'r1', agent_id: null, at: 1000, model: 'x', is_fast: 1,
-    input: 1, cache_write_5m: 2, cache_write_1h: 3, cache_read: 4, output: 5,
-    tools: '["Read","Agent"]', tool_use_ids: '["t1"]',
+    message_id: 'm1',
+    request_id: 'r1',
+    agent_id: null,
+    at: 1000,
+    model: 'x',
+    is_fast: 1,
+    input: 1,
+    cache_write_5m: 2,
+    cache_write_1h: 3,
+    cache_read: 4,
+    output: 5,
+    tools: '["Read","Agent"]',
+    tool_use_ids: '["t1"]',
   })
   expect(r.isFast).toBe(true)
   expect(r.agentId).toBe(null)

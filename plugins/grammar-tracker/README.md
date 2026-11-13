@@ -1,33 +1,47 @@
 # grammar-tracker
 
-Tracks the English mistakes in the prompts a Spanish, Portuguese, French or Italian speaker writes to Claude Code,
-counts how often each mistake repeats, and shows the check of the last prompt in a band above the prompt and in a
-`grammar` pane.
+Learn English while you work with Claude Code. grammar-tracker checks the English of every prompt you write, shows
+your mistakes beside the chat as Claude answers, and counts the ones you keep repeating.
+
+It is built for Spanish, Portuguese, French and Italian speakers: the check looks for the mistakes speakers of your
+language make in English, such as calques and false friends.
+
+<!-- GIF: a prompt with mistakes, the band, and the pane opening while Claude answers -->
+
+## Features
+
+- **A check of every prompt, with no extra step.** Claude starts each reply with a grammar check of your prompt. The
+  mod hides it from the reply and shows it in a band above the prompt and in a side pane.
+- **Mistakes explained.** Each mistake shows your sentence, the corrected sentence, the reason, and its type (verb
+  tense, preposition, false friend and 15 more), with an example.
+- **The corrected prompt**, rewritten in natural English.
+- **Recurring mistakes.** Every mistake has a counter across all your prompts. From the third time, the mod marks it
+  as recurring and tells you which one to watch out for.
+- **Progress.** A clean-prompt streak and a trend of your last 10 prompts in this conversation, and a ranking of your
+  top 10 mistakes with the share of each type.
+- **Dictation-aware.** Filler words, false starts and missing punctuation from voice input are not counted as
+  mistakes.
+- **Local and private.** Your history is stored in a SQLite file on your machine. The mod calls no service besides the
+  Claude conversation you are already in.
+
+<!-- GIF: the Top mistakes tab, opening a row -->
+
+## How it works
+
+The mod adds an instruction to each prompt that asks Claude to start its reply with a short JSON block. As soon as the
+block closes, the mod saves it to SQLite and shows it, while Claude is still answering. The
+[architecture document](docs/ARCHITECTURE.md) describes the modules, the database, the query command and how to
+develop the mod.
 
 ## Requirements
 
-- Python 3.10 or newer on the `PATH`, as `python3`, `py` or `python`. The mod uses the first of `python3`, `py -3` and
-  `python` that starts and is Python 3, so any install from python.org, the Microsoft Store, Homebrew or a Linux
-  package works. The scripts use the standard library only.
-- A Python older than 3.10 shows `Grammar tracker needs Python 3.10 or newer`. On macOS this is the `python3` of Apple's
-  Command Line Tools (`/usr/bin/python3`): install a newer one and start Claude Code from a terminal whose `PATH` finds
-  it first.
-- The database (`grammar.db`) and the error log (`errors.log`) live in the plugin's data folder, which Claude Code
-  creates as `~/.claude/plugins/data/grammar-tracker-qol/` for an install from the `qol` marketplace. Updates keep
-  it. Uninstalling deletes it, unless you uninstall with `claude plugin uninstall grammar-tracker@qol --keep-data`.
-
-## Data folder
-
-The mod saves your grammar checks in a SQLite database named `grammar.db`. By default, the database is in this
-folder:
-
-```
-~/.claude/plugins/data/grammar-tracker-qol/
-```
-
-The same folder holds `errors.log`, where the mod writes any errors.
+- Claude Code in a terminal.
+- Python 3.10 or newer on the `PATH` as `python3`, `py` or `python`, on Linux, macOS or Windows. Any install works
+  (python.org, Microsoft Store, Homebrew, a Linux package). The mod needs no Python package.
 
 ## Install
+
+At the Claude Code prompt:
 
 ```
 /plugin install grammar-tracker --marketplace chaufon/qol
@@ -35,196 +49,68 @@ The same folder holds `errors.log`, where the mod writes any errors.
 
 The [marketplace README](../../README.md) has the shell command, updates and uninstalling.
 
-## Native language
+## Use
 
-The `native_language` option names your native language: `Spanish` (the default), `Portuguese`, `French` or
-`Italian`. The grammar check looks for the mistakes speakers of that language make in English, such as its calques.
-Set it on the screen the install shows, or later in `/plugin` (manage the plugin, then configure it) or in `/config`.
+Write prompts as usual.
 
-- While the option is unset, the check uses Spanish.
-- A value outside the list, such as a typo in `settings.json`, also gives Spanish, and `errors.log` gets a line that
-  names the value and the valid ones. Case does not matter: `french` is `French`.
-- The hooks module reads the option and passes it to `scripts/prompt_context.py` as `native_language`, which checks it
-  and names it in the grammar check instruction.
-- The languages are `NATIVE_LANGUAGES` in `scripts/lib/config.py` and the `options` of `userConfig.native_language` in
-  `.claude-plugin/plugin.json`. A test keeps the two equal.
+- **The band**, above the prompt, shows `⠋ Checking…` while Claude answers, then the result:
+  `✗ 3 mistakes · ⟳ 1 recurring`, `✓ No mistakes`, or `Grammar check does not apply to the last prompt` (for a prompt
+  too short to check or not in English).
+- **The pane** opens by itself, without taking the focus, when a check finds mistakes. Open or close it with the
+  band's `Show`/`Hide` button, or with `ctrl+x tab` then `g`. In the pane, `t` switches tabs and `h` or Esc hides it.
+  - **Last prompt:** one card per mistake, the corrected prompt, the clean streak and the trend.
+  - **Top mistakes:** your 10 most frequent mistakes. Click a row to see its latest example.
+- **Skip the check** for one prompt by starting it with `Claude, do not grammar check` (or `don't grammar check`,
+  `skip grammar check`, `no grammar check`).
 
-## Skip the check for one prompt
+## Options
 
-Start the prompt with `Claude, do not grammar check` (or `don't grammar check`, `skip grammar check`,
-`no grammar check`).
+Set them on the screen the install shows, or later in `/plugin` (manage the plugin, then configure it).
 
-## How it works
+| Option | Default | Effect |
+| --- | --- | --- |
+| `native_language` | `Spanish` | Your native language: `Spanish`, `Portuguese`, `French` or `Italian`. The check looks for the mistakes its speakers make |
+| `autoOpenPane` | `true` | Open the pane by itself when a check finds mistakes. With `false`, the band still shows each check and `Show` opens the pane |
 
-1. When you submit a prompt, the mod's hooks module (`hooks/register.tsx`) runs `scripts/prompt_context.py` and
-   attaches the text it prints to the prompt, for Claude alone. The text asks Claude to start the reply with a grammar
-   check of the prompt: the label `**English grammar check:**` and a `grammar-json` block, with no other
-   text about the check. The block holds the input mode (typed or dictated), the corrected prompt, and one entry per
-   mistake with its type, identifier, original sentence, corrected sentence and a short reason. The instruction lists
-   the active types from the `mistake_types` table.
-2. The hooks module watches the streamed reply of the main loop. When the `grammar-json`
-   block closes, it runs `scripts/save_check.py` with the turn id, the conversation id, the folder, the prompt, the
-   reply so far and the time the prompt was sent. It does not wait for the end of the reply.
-3. `save_check.py` reads the `grammar-json` block, saves it to SQLite (`grammar.db`), and prints the corrected prompt
-   and each mistake with its reason and counter. The turn id is the key of the saved prompt, so a check is saved once.
-4. The band and the pane show the check at once, while the answer still streams. The mod hides the grammar check from
-   the reply on screen. The stored reply keeps it (ctrl+o shows it).
-5. `prompt_uuid`, the id of the prompt in the transcript, is stored later by `query.py rekey`, which runs at the start
-   of each save.
+## Your data
+
+The mod keeps your checks in `grammar.db`, and any errors in `errors.log`, in:
 
 ```
-prompt ──> mod ──> prompt_context.py ──> Claude's reply streams: label + grammar-json block + answer
-                                     │
-          block closes ──> mod ──> save_check.py ──> grammar.db
-                                     │
-                       band "✎ ✗ 3 mistakes · ⟳ 1 recurring   g: Hide"
-                                     │ the pane opens, or click Show, or ctrl+x tab then g
-                       pane: Last prompt (query.py trend) | Top mistakes (query.py top)
+~/.claude/plugins/data/grammar-tracker-qol/
 ```
 
-## Mistake types
+Updates keep the folder. Uninstalling deletes it, unless you uninstall with
+`claude plugin uninstall grammar-tracker@qol --keep-data`.
 
-The `mistake_types` table in the database holds the types of mistake. Its columns:
+## Limitations
 
-| Column | Meaning |
-|---|---|
-| `key` | Short name that Claude writes in the `grammar-json` block and that `mistakes.type` stores |
-| `label` | Name shown in reports |
-| `description` | What the type covers |
-| `example` | A short example of the mistake |
-| `identifier_rule` | How Claude writes the identifier of a mistake of this type |
-| `position` | Order of the type in Claude's instruction |
-| `deleted_at` | UTC timestamp (ISO 8601) of the deletion; `NULL` while the type is active |
+- **The check costs tokens.** The instruction adds input tokens to every prompt, and the check adds output tokens to
+  every reply.
+- **Claude can be wrong.** The check is Claude's judgment of your English, and it can miss a mistake or report one
+  that is not.
+- **Terminal only.** The band and the pane are verified in the terminal. The Desktop app is not verified yet. The
+  Claude mobile app (Remote Control) draws no mods and shows the full reply with the check. Claude Code on the web
+  runs in the cloud, without the mod or your local database.
+- **Four native languages.** Speakers of other languages can use the mod with the closest option, but the check will
+  not look for the mistakes typical of their language.
 
-- A type is deleted by setting its `deleted_at`. Deleted types are not in Claude's instruction.
-- A key that is unknown or deleted is saved as `other`.
-- Saved mistakes keep their type, even after the type is deleted.
+## FAQ
 
-## Band and pane
+**Does the mod send my prompts anywhere?**
+No. The check happens inside the Claude conversation you are already in, and the results stay in a file on your
+machine.
 
-- The band above the prompt shows one line of colored chips for the last prompt, after a teal `✎`: `⠋ Checking…`
-  while the reply streams, `✗ 3 mistakes · ⟳ 1 recurring   g: Show` (red and yellow) once the check block closes
-  (the pane may be closed; the recurring chip is left out when no mistake is recurring),
-  `✓ No mistakes` (green) when the check finds none,
-  `Grammar check does not apply to the last prompt` as soon as that line streams, or
-  `Grammar: no check for the last prompt` (a new conversation, an interrupted reply, a reply without a check block, or
-  a failed save), both dim. Its `Show` button is always there, so the **Top mistakes** tab is always reachable.
-- A mistake is recurring when its counter, across all prompts, reaches `RECURRING_THRESHOLD = 3`
-  (`scripts/lib/config.py`).
-- Open the `✎ Grammar` pane with a click on `Show` (fullscreen terminal) or with `ctrl+x tab` then `g`. Close it with
-  `Hide` in the band or the pane, with `g` while the band has the focus, or with `h` or Esc in the pane. It stays open
-  across replies.
-- The pane opens by itself, without taking the focus and on the **Last prompt** tab, when a saved check arrives. It does
-  not open for a check with no mistakes, a check that does not apply, a skipped, interrupted or failed check, or after you hid it by hand. `Show`
-  opens it again with the focus and turns the automatic opening back on. An open pane keeps its tab and refreshes. A
-  pane the mod opens unasked is held back below 144 columns (110 once you opened it by hand); the band stays the signal.
-- To keep the pane closed until you open it, set the `autoOpenPane` option to `false` in `/config` (setting
-  `pluginConfigs["grammar-tracker"].options.autoOpenPane` in `settings.json`). The default is `true`. With `false`, the band
-  still shows each check, and `Show` opens the pane as usual.
-- Claude Code places the pane: a sidebar on the right in the fullscreen layout at 110 columns or more, otherwise a box
-  above the prompt.
-- The pane's top row switches between its two tabs; the shown one has a colored background. Its last row holds the
-  keys, `t: Tab` and `h: Hide`, under a line, and both stay at the bottom while the pane scrolls. `t` switches the tab while the pane
-  has the focus.
-- **Last prompt** tab: while the reply streams, the tab shows only `⠋ Checking this prompt…`. Then:
-  - A mascot drawn with block characters and a headline. The mascot smiles; it looks worried when a mistake of the
-    check is recurring. The headline counts the mistakes (`3 mistakes, 1 you keep repeating.`), and the line under it
-    names the most frequent recurring mistake (`Watch out for "it" (×59)`). A check with no mistakes shows
-    `✓ No mistakes. Great English, keep it up!` in green.
-  - Three tiles: **Mistakes** and **Recurring** of this check, and **Clean streak**, the prompts of this
-    conversation, counted back from the last one, with no mistake. `–` stands for a streak that failed to load.
-  - A trend line, `Conversation ▅▁█▁▁ last 5 prompts`, with one block per prompt of this conversation (the last 10),
-    as tall as its mistake count: green and lowest for a clean prompt, yellow otherwise.
-  - One card per mistake. The card's border shows an icon of the mistake's type, the type, the identifier, and at the
-    right end five dots that fill as the mistake repeats, the counter and `⟳` for a recurring mistake
-    (`⇄ Preposition · "check + no preposition"   ●●○○○ ×2`). Inside are the original sentence in red (`✗`), the
-    corrected sentence in green (`✓`), Claude's reason, and the type's description and example, dimmed. Recurring
-    mistakes have a yellow border. The corrected prompt is in its own card at the end.
-- **Top mistakes** tab: the 10 most frequent mistakes, read again each time the tab is shown. It starts with the
-  mascot, worried while a mistake recurs and happy otherwise, a headline (`2 mistakes you keep repeating.`) and the
-  mistake to watch out for. Three tiles follow: the sum of the counters, the recurring mistakes and the types. Under
-  them a bar shows the share of each type in the sum, in the type's color, with the icon and the percentage of each
-  type under it. Then one row per mistake: rank, the type's icon, type, identifier, a bar and the counter. The bar is
-  as long as the counter's share of the largest counter, and the bar and the counter are yellow for a recurring
-  mistake and green otherwise. A click on a row opens a card under it and marks
-  the row with `▾`, and a second click closes it; one row is open at a time. The card's
-  border shows the type's description (cut with `…` when the border is too short, and then repeated in full inside).
-  Inside are the type's example and the most recent original sentence, corrected sentence and reason.
-- Every icon is a single character and the mascot is block characters, so the pane needs no image support from the
-  terminal. A font without a glyph shows its own placeholder for that icon.
-- Failures go to `errors.log` next to the database and never block Claude Code. A failure of the save or of the
-  pane's query also shows a toast. A prompt whose instruction cannot be built (a broken database) goes to Claude
-  without it; when no Python 3 starts, a toast says so.
-- When the data folder cannot be created or written (for example, a `CLAUDE_CONFIG_DIR` without write access), the
-  toasts and the pane show `Grammar tracker: cannot write to the data folder <path>` instead.
+**Why does a reply start with "English grammar check" when I view the full reply (ctrl+o)?**
+That is the check Claude wrote. The mod hides it on screen and reads it from there.
 
-## Query
+**A toast says `Grammar tracker needs Python 3.10 or newer`.**
+The first Python on your `PATH` is older than 3.10. On macOS this is often the `python3` of Apple's Command Line Tools
+(`/usr/bin/python3`): install a newer Python and start Claude Code from a terminal whose `PATH` finds it first.
 
-`top` prints the mistakes you make most often as a JSON list, each with its counter and its latest example, with the
-fields of `save_check.py`'s `occurrences`. The optional `N` sets how many (default 10). The pane uses it.
+**A toast says the mod cannot write to the data folder.**
+The data folder is not writable, for example under a `CLAUDE_CONFIG_DIR` without write access. The prompts go on
+without the check until the folder is writable.
 
-`trend SESSION_ID [N]` prints the mistake count of each of the last `N` prompts (default 10) of one conversation, oldest
-first, as a JSON list. The pane uses it for the clean streak and the trend line.
-
-`rekey` stores the transcript uuid of each saved prompt that has none: it finds the user entry of the conversation's
-transcript with the same text and the closest time. It prints the number of prompts that got a uuid. Prompts with no
-match stay as they are, and a later run tries them again.
-
-```
-python3 scripts/query.py top [N]
-python3 scripts/query.py trend SESSION_ID [N]
-python3 scripts/query.py rekey
-```
-
-Run it from the mod's folder, with `py -3` or `python` in place of `python3` where that is your Python. It reads the data folder described in [Data folder](#data-folder); set
-`CLAUDE_PLUGIN_DATA` to read another one.
-
-## Layout
-
-| Path | Purpose |
-|---|---|
-| `scripts/prompt_context.py` | Prints the grammar check instruction the mod attaches to each prompt |
-| `scripts/save_check.py` | Saves the reply's `grammar-json` block and prints the check with its counters |
-| `scripts/query.py` | Command line query on the database (`top`, `trend`, `rekey`) |
-| `scripts/lib/` | Configuration, error log, instruction text, transcript parsing, re-keying, database, report formatting |
-| `.claude-plugin/plugin.json` | Mod manifest |
-| `hooks/hooks.json` | Names the hooks module |
-| `hooks/register.tsx` | Hooks module: finds Python, attaches the grammar check instruction to each prompt, watches the streamed reply, runs `save_check.py`, draws the band and the pane, hides the check from the reply |
-| `hooks/register.test.ts` | Tests of the hooks module (`claude plugin test`) |
-| `tsconfig.json` | TypeScript settings for the type check |
-| `types/index.d.ts` | Type contract of the mod's `$.state` values |
-| `tests/` | pytest suite of the Python scripts, and the live tests of the grammar check (`test_live_check.py`) |
-
-## Develop
-
-From the repository root:
-
-```
-claude --plugin-dir plugins/grammar-tracker
-claude plugin validate plugins/grammar-tracker
-claude plugin test plugins/grammar-tracker
-npx -y -p typescript tsc -p plugins/grammar-tracker
-python3 -m pytest plugins/grammar-tracker
-```
-
-`pytest` must be installed for the last command.
-
-`tests/test_live_check.py` tests the grammar check itself: it sends prompts with mistakes typical of each native
-language, and correct prompts, to Claude through `claude -p` with the mod loaded, and checks what the check reports.
-These tests cost tokens and depend on the model's answer, so pytest skips them unless `GRAMMAR_TRACKER_LIVE=1` is set.
-`GRAMMAR_TRACKER_LIVE_MODEL` picks the model. They write nothing to the real `grammar.db`.
-
-```
-GRAMMAR_TRACKER_LIVE=1 python3 -m pytest plugins/grammar-tracker/tests/test_live_check.py
-``` The type check needs `plugins/grammar-tracker/.claude-plugin/types/`,
-which Claude Code writes the first time it loads the mod.
-
-A session started with `--plugin-dir` uses the same data folder as an install, `grammar-tracker-qol/`.
-
-## Status
-
-- Grammar check, `grammar-json` block, database storage, band and pane work in the terminal.
-- The Desktop app is not verified yet.
-- The Claude mobile app (Remote Control) draws no mods: it shows the full reply with the grammar check, and no band or
-  pane.
-- Sessions that run in Anthropic's cloud (Claude Code on the web) have no access to the mod or the local database.
+**Something else went wrong.**
+Look at `errors.log` in the data folder. Failures never block Claude Code: the prompt goes on without the check.

@@ -10,7 +10,7 @@ const DIR = `${ROOT}/projects/-work-app`
 
 const bytes = (text: string) => new TextEncoder().encode(text)
 
-type Fake = {
+interface Fake {
   $: EngineInterface
   files: Map<string, string>
   limit: number
@@ -20,27 +20,33 @@ type Fake = {
   config: () => Promise<string>
 }
 
-const globToRegExp = (glob: string) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`)
+const globToRegExp = (glob: string) =>
+  new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`)
 
 // An in-memory disk behind the `$` calls the module makes: env.get, session.cwd and process.run
 // (find, cat and tail -c +N, byte-accurate and cut to `limit` bytes).
 function fakeDisk(): Fake {
-  const fake = { files: new Map<string, string>(), limit: Infinity, env: { HOME: '/home/u' } as Record<string, string>, runs: [] as string[][] } as Fake
+  const env: Record<string, string> = { HOME: '/home/u' }
+  const fake = { files: new Map<string, string>(), limit: Infinity, env, runs: [] as string[][] } as Fake
   const out = (stdout: string, exitCode = 0, isStdoutTruncated = false) => ({
-    exitCode, stdout, stderr: '', isStdoutTruncated, isStderrTruncated: false,
+    exitCode,
+    stdout,
+    stderr: '',
+    isStdoutTruncated,
+    isStderrTruncated: false,
   })
-  const run = async (argv: readonly string[]) => {
+  const answer = (argv: readonly string[]) => {
     fake.runs.push([...argv])
     if (argv[0] === 'find') {
       const dir = argv[1]!
       const depth = Number(argv[3])
       const name = globToRegExp(argv[5]!)
-      const hits = [...fake.files.keys()].filter((path) => {
+      const hits = [...fake.files.keys()].filter(path => {
         if (!path.startsWith(`${dir}/`)) return false
         const parts = path.slice(dir.length + 1).split('/')
         return parts.length <= depth && name.test(parts[parts.length - 1]!)
       })
-      return out(hits.map((p) => `${p}\n`).join(''), hits.length > 0 ? 0 : 1)
+      return out(hits.map(p => `${p}\n`).join(''), hits.length > 0 ? 0 : 1)
     }
     if (argv[0] === 'cat') {
       const content = fake.files.get(argv[1]!)
@@ -65,9 +71,14 @@ function fakeDisk(): Fake {
     }
     throw new Error(`unexpected ${argv.join(' ')}`)
   }
+  // A throw in `answer` becomes a rejection, as it does from the real process.run.
+  const run = (argv: readonly string[]) =>
+    new Promise<ReturnType<typeof answer>>(resolve => {
+      resolve(answer(argv))
+    })
   fake.$ = {
-    env: { get: async (name: string) => fake.env[name] },
-    session: { cwd: async () => '/fallback' },
+    env: { get: (name: string) => Promise.resolve(fake.env[name]) },
+    session: { cwd: () => Promise.resolve('/fallback') },
     process: { run },
   } as unknown as EngineInterface
   fake.read = (reader, id) => readConversation(fake.$, reader, id)
@@ -85,12 +96,13 @@ const assistant = (id: string, at: string, text: string, tools: string[] = []) =
       id: `msg_${id}`,
       model: 'claude-opus-5',
       usage: { input_tokens: 1, output_tokens: 2 },
-      content: [{ type: 'text', text }, ...tools.map((t) => ({ type: 'tool_use', id: t, name: 'Agent' }))],
+      content: [{ type: 'text', text }, ...tools.map(t => ({ type: 'tool_use', id: t, name: 'Agent' }))],
     },
   }) + '\n'
 
 const prompt = (text: string) =>
-  JSON.stringify({ type: 'user', timestamp: '2026-10-28T09:59:00.000Z', message: { role: 'user', content: text } }) + '\n'
+  JSON.stringify({ type: 'user', timestamp: '2026-10-28T09:59:00.000Z', message: { role: 'user', content: text } }) +
+  '\n'
 
 const MAIN = `${DIR}/c1.jsonl`
 const META = (id: string) => `${DIR}/c1/subagents/agent-${id}.meta.json`
@@ -124,8 +136,8 @@ test('a main transcript with a subagent', async () => {
     { agentId: 'a1', name: 'Find the hooks', parentAgentId: null, toolUseId: 'toolu_1' },
   ])
   expect(conversation.requests.length).toBe(3)
-  expect(conversation.requests.filter((r) => r.agentId === 'a1').length).toBe(1)
-  expect(conversation.requests.filter((r) => r.agentId === null).length).toBe(2)
+  expect(conversation.requests.filter(r => r.agentId === 'a1').length).toBe(1)
+  expect(conversation.requests.filter(r => r.agentId === null).length).toBe(2)
 })
 
 test('the name falls back to the agent type', async () => {
@@ -147,7 +159,7 @@ test('a nested subagent points at the subagent that launched it', async () => {
   fake.files.set(META('a2'), '{"agentType":"Explore","description":"Second","toolUseId":"toolu_2"}')
   fake.files.set(SUB('a2'), assistant('s2', '2026-10-28T10:00:40.000Z', 'y'))
   const conversation = (await read(newReader(), 'c1'))!
-  const byId = Object.fromEntries(conversation.subagents.map((s) => [s.agentId, s]))
+  const byId = Object.fromEntries(conversation.subagents.map(s => [s.agentId, s]))
   expect(byId.a1!.parentAgentId).toBe(null)
   expect(byId.a2!.parentAgentId).toBe('a1')
 })
@@ -156,13 +168,14 @@ test('a small read limit gives the same requests as an unlimited read', async ()
   const fake = fakeDisk()
   const { read } = fake
   let text = prompt('Café 😀')
-  for (let i = 0; i < 12; i++) text += assistant(String(i), `2026-10-28T10:${String(i).padStart(2, '0')}:00.000Z`, `é😀 ${'x'.repeat(10)}`)
+  for (let i = 0; i < 12; i++)
+    text += assistant(String(i), `2026-10-28T10:${String(i).padStart(2, '0')}:00.000Z`, `é😀 ${'x'.repeat(10)}`)
   fake.files.set(MAIN, text)
   const whole = await read(newReader(), 'c1')
   fake.limit = 300
   fake.runs.length = 0
   const cut = await read(newReader(), 'c1')
-  expect(fake.runs.filter((argv) => argv[0] === 'tail').length).toBeGreaterThan(5)
+  expect(fake.runs.filter(argv => argv[0] === 'tail').length).toBeGreaterThan(5)
   expect(whole!.requests.length).toBe(12)
   expect(cut).toEqual(whole)
 })
@@ -176,7 +189,7 @@ test('a call after an append adds only the new request', async () => {
   expect((await read(reader, 'c1'))!.requests.length).toBe(2)
   fake.files.set(MAIN, mainFile() + assistant('3', '2026-10-28T10:02:00.000Z', 'é😀'))
   const conversation = (await read(reader, 'c1'))!
-  expect(conversation.requests.map((r) => r.messageId)).toEqual(['msg_1', 'msg_2', 'msg_3'])
+  expect(conversation.requests.map(r => r.messageId)).toEqual(['msg_1', 'msg_2', 'msg_3'])
 })
 
 test('a half-written last line is read once it is complete', async () => {
@@ -199,7 +212,7 @@ test('a different conversation id reads the other file only', async () => {
   expect((await read(reader, 'c1'))!.requests.length).toBe(2)
   const other = (await read(reader, 'c2'))!
   expect(other.id).toBe('c2')
-  expect(other.requests.map((r) => r.messageId)).toEqual(['msg_9'])
+  expect(other.requests.map(r => r.messageId)).toEqual(['msg_9'])
 })
 
 test('no transcript file yet gives null, and the file is found later', async () => {
@@ -245,10 +258,13 @@ test('a complete line longer than the read limit is skipped', async () => {
   const fake = fakeDisk()
   const { read } = fake
   const big = prompt('x'.repeat(1000))
-  fake.files.set(MAIN, assistant('1', '2026-10-28T10:00:00.000Z', 'a') + big + assistant('2', '2026-10-28T10:01:00.000Z', 'b'))
+  fake.files.set(
+    MAIN,
+    assistant('1', '2026-10-28T10:00:00.000Z', 'a') + big + assistant('2', '2026-10-28T10:01:00.000Z', 'b'),
+  )
   fake.limit = 300
   const conversation = (await read(newReader(), 'c1'))!
-  expect(conversation.requests.map((r) => r.messageId)).toEqual(['msg_1', 'msg_2'])
+  expect(conversation.requests.map(r => r.messageId)).toEqual(['msg_1', 'msg_2'])
 })
 
 test('an oversized last line without its newline is kept until it is complete', async () => {
@@ -258,8 +274,11 @@ test('an oversized last line without its newline is kept until it is complete', 
   fake.files.set(MAIN, assistant('1', '2026-10-28T10:00:00.000Z', 'a') + big.slice(0, -1))
   fake.limit = 300
   const reader: Reader = newReader()
-  expect((await read(reader, 'c1'))!.requests.map((r) => r.messageId)).toEqual(['msg_1'])
-  expect((await read(reader, 'c1'))!.requests.map((r) => r.messageId)).toEqual(['msg_1'])
-  fake.files.set(MAIN, assistant('1', '2026-10-28T10:00:00.000Z', 'a') + big + assistant('2', '2026-10-28T10:01:00.000Z', 'b'))
-  expect((await read(reader, 'c1'))!.requests.map((r) => r.messageId)).toEqual(['msg_1', 'msg_2'])
+  expect((await read(reader, 'c1'))!.requests.map(r => r.messageId)).toEqual(['msg_1'])
+  expect((await read(reader, 'c1'))!.requests.map(r => r.messageId)).toEqual(['msg_1'])
+  fake.files.set(
+    MAIN,
+    assistant('1', '2026-10-28T10:00:00.000Z', 'a') + big + assistant('2', '2026-10-28T10:01:00.000Z', 'b'),
+  )
+  expect((await read(reader, 'c1'))!.requests.map(r => r.messageId)).toEqual(['msg_1', 'msg_2'])
 })

@@ -1,6 +1,7 @@
 """Code shared by the grammar tracker scripts. Importing it on a Python older than MIN_PYTHON logs the error and
 exits with it, before any module that needs a newer Python loads. This file keeps to syntax that older Pythons
 parse."""
+
 import sys
 
 MIN_PYTHON = (3, 10)

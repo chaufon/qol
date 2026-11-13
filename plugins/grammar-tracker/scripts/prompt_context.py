@@ -8,6 +8,7 @@ passes as native_language: a missing value gives config.DEFAULT_NATIVE_LANGUAGE,
 config.NATIVE_LANGUAGES gives it too and is logged to the error log. The mistake types in the instruction are the
 active ones in the database. Never fails: errors go to the error log, and the output holds a systemMessage warning when
 the error log cannot be written either."""
+
 import json
 import re
 import sys
@@ -32,7 +33,8 @@ def native_language(value: object) -> tuple[str, bool]:
         return config.DEFAULT_NATIVE_LANGUAGE, True
     return config.DEFAULT_NATIVE_LANGUAGE, log_error(
         f"Grammar tracker: unknown native language {text!r}; using {config.DEFAULT_NATIVE_LANGUAGE}. Pick one of "
-        f"{', '.join(config.NATIVE_LANGUAGES)} in the mod's native_language option.\n")
+        f"{', '.join(config.NATIVE_LANGUAGES)} in the mod's native_language option.\n"
+    )
 
 
 def instruction(language: str) -> str:
@@ -44,7 +46,7 @@ def instruction(language: str) -> str:
 
 
 def main() -> None:
-    output = {}
+    output: dict[str, str] = {}
     payload = json.load(sys.stdin)
     prompt = payload.get("prompt") or ""
     if not SKIP_RE.match(prompt):

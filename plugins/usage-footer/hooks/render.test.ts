@@ -19,7 +19,7 @@ test('the footer draws size, window and reset with their colors', async ($, on) 
     const ui = await $.ui.mount({ plugin: 'usage-footer', surface, component: 'SessionMode', props: { modes: [] } })
     const span = async (text: string) => (await ui.findAll({ type: 'Text', text })).at(-1)?.props
 
-    expect(await span('120k')).toMatchObject({ color: 'warning', bold: true })
+    expect(await span('120k')).toMatchObject({ color: 'warning', weight: 'semibold' })
     expect(await ui.find({ type: 'Box', key: 'context' })).toMatchObject({ text: '120k 60% of 200k ' })
     expect(await ui.find({ type: 'Text', text: ' (60%)' })).toBeUndefined()
     expect(await span('█████████▌')).toMatchObject({ color: 'error' })
@@ -39,7 +39,12 @@ test('a pointer over the size reveals its share of the window on the row above',
     changed: ['context', 'rateLimits'],
   })
 
-  const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: ['focus'] } })
+  const ui = await $.ui.mount({
+    plugin: 'usage-footer',
+    surface: 'terminal',
+    component: 'SessionMode',
+    props: { modes: ['focus'] },
+  })
   const context = row(await ui.drawn())[1]
   const parts = context === undefined || typeof context === 'string' ? [] : row(context)
   const card = parts.at(-1)
@@ -69,11 +74,16 @@ test('the 7-day window reveals its reset time on hover', async ($, on) => {
     changed: ['context', 'rateLimits'],
   })
 
-  const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  const ui = await $.ui.mount({
+    plugin: 'usage-footer',
+    surface: 'terminal',
+    component: 'SessionMode',
+    props: { modes: [] },
+  })
   const span = async (text: string) => (await ui.findAll({ type: 'Text', text })).at(-1)?.props
   const week = (await ui.findAll({ type: 'Box' })).find(b => b.key === 'seven-day')
 
-  expect(await span('42%')).toMatchObject({ color: 'success', bold: true })
+  expect(await span('42%')).toMatchObject({ color: 'success', weight: 'semibold' })
   expect(week?.children).toContainEqual(
     expect.objectContaining({
       type: 'Box',
