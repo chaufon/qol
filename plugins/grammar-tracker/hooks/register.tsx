@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { GrammarCheck, PaneTab, TopMistakes } from '../types'
-import { checkState, stripCheck, toCheck, toOccurrence } from './check'
-import type { ContextOutput, OccurrenceFields, SaveOutput } from './check'
+import { checkState, stripCheck, toCheck, toReport } from './check'
+import type { ContextOutput, ReportFields, SaveOutput } from './check'
 import { drawBand, drawPane } from './draw'
 import type { PaneActions } from './draw'
 import { runScript } from './python'
@@ -14,7 +14,7 @@ const last = atom({ plugin: 'grammar-tracker', key: 'last' } as const, null)
 const isOpen = atom({ plugin: 'grammar-tracker', key: 'isOpen' } as const, false)
 const tab = atom({ plugin: 'grammar-tracker', key: 'tab' } as const, 'last')
 const top = atom({ plugin: 'grammar-tracker', key: 'top' } as const, null as TopMistakes)
-const openRow = atom({ plugin: 'grammar-tracker', key: 'openRow' } as const, null as string | null)
+const openRows = atom({ plugin: 'grammar-tracker', key: 'openRows' } as const, [] as string[])
 const pending = atom({ plugin: 'grammar-tracker', key: 'pending' } as const, false)
 const manualHide = atom({ plugin: 'grammar-tracker', key: 'manualHide' } as const, false)
 const rulesShown = atom({ plugin: 'grammar-tracker', key: 'rulesShown' } as const, null as boolean | null)
@@ -50,8 +50,8 @@ function parseJson<T>(stdout: string, empty: T): T {
 
 async function refreshTop($: EngineInterface): Promise<void> {
   try {
-    const fields = JSON.parse(await runScript($, 'query.py', ['top'])) as OccurrenceFields[]
-    await update($, top, () => ({ mistakes: fields.map(toOccurrence) }))
+    const fields = JSON.parse(await runScript($, 'query.py', ['top'])) as ReportFields
+    await update($, top, () => toReport(fields))
   } catch (error) {
     const message = `Grammar tracker: failed to read the top mistakes (${String(error)})`
     await update($, top, () => ({ error: message }))
@@ -148,12 +148,15 @@ async function saveCheck($: EngineInterface, current: Turn, reply: string): Prom
   }
 }
 
-function paneActions($: EngineInterface, row: string | null, isRulesShown: boolean): PaneActions {
+function paneActions($: EngineInterface, isRulesShown: boolean): PaneActions {
   return {
     showTab: id => showTab($, id),
     hide: () => closePane($),
     toggleRow: async id => {
-      await update($, openRow, () => (row === id ? null : id))
+      await update($, openRows, ids => (ids.includes(id) ? ids.filter(other => other !== id) : [...ids, id]))
+    },
+    toggleAll: async all => {
+      await update($, openRows, ids => (all.some(id => ids.includes(id)) ? [] : all))
     },
     toggleRules: async () => {
       await update($, flippedRules, () => [])
@@ -254,7 +257,6 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const row = await read($, openRow)
     const isRulesShown = (await read($, rulesShown)) ?? isRulesShownByDefault
     const props = {
       width: e.props.bodyColumns,
@@ -263,10 +265,10 @@ export const register: Register = (on, options) => {
       check: await read($, last),
       isPending: await read($, pending),
       top: await read($, top),
-      openRow: row,
+      openRows: await read($, openRows),
       isRulesShown,
       flippedRules: await read($, flippedRules),
     }
-    return drawPane($.ui.resolve(e), props, paneActions($, row, isRulesShown))
+    return drawPane($.ui.resolve(e), props, paneActions($, isRulesShown))
   })
 }

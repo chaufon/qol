@@ -361,16 +361,94 @@ def save_check(
     return saved
 
 
-def top_mistakes(conn: sqlite3.Connection, limit: int) -> list[SavedOccurrence]:
+@dataclass
+class RankedMistake(SavedOccurrence):
+    """A saved mistake with its latest occurrence as the example, and `recent`, its occurrences in the prompts sent at
+    the `since` time or later."""
+
+    recent: int
+
+
+_RANKED = (
+    "SELECT * FROM (SELECT t.key, t.label, t.description, t.example, m.identifier, latest.original_sentence,"
+    " latest.corrected_sentence, latest.reason, stats.n, stats.recent, stats.latest_id"
+    " FROM (SELECT o.mistake_id, COUNT(*) AS n, MAX(o.id) AS latest_id, SUM(p.created_at >= :since) AS recent"
+    " FROM occurrences o JOIN prompts p ON p.id = o.prompt_id GROUP BY o.mistake_id) stats"
+    " JOIN mistakes m ON m.id = stats.mistake_id"
+    " JOIN mistake_types t ON t.key = m.type"
+    " JOIN occurrences latest ON latest.id = stats.latest_id)"
+)
+
+
+def _ranked(conn: sqlite3.Connection, rest: str, **params: str | int) -> list[RankedMistake]:
+    rows = conn.execute(f"{_RANKED} {rest}", {"since": "", **params}).fetchall()
+    return [RankedMistake(*row[:-1]) for row in rows]
+
+
+def top_mistakes(conn: sqlite3.Connection, limit: int, since: str = "") -> list[RankedMistake]:
     """Return the most frequent mistakes across all prompts, each with its latest occurrence as the example."""
-    rows = conn.execute(
-        "SELECT t.key, t.label, t.description, t.example, m.identifier, latest.original_sentence,"
-        " latest.corrected_sentence, latest.reason, counts.n"
-        " FROM (SELECT mistake_id, COUNT(*) AS n, MAX(id) AS latest_id FROM occurrences GROUP BY mistake_id) counts"
-        " JOIN mistakes m ON m.id = counts.mistake_id"
-        " JOIN mistake_types t ON t.key = m.type"
-        " JOIN occurrences latest ON latest.id = counts.latest_id"
-        " ORDER BY counts.n DESC, counts.latest_id DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    return [SavedOccurrence(*row) for row in rows]
+    return _ranked(conn, "ORDER BY n DESC, latest_id DESC LIMIT :limit", limit=limit, since=since)
+
+
+def _prompts_around(conn: sqlite3.Connection, since: str) -> tuple[int, int]:
+    """Count the prompts sent at `since` or later, and the ones sent before."""
+    recent, earlier = conn.execute(
+        "SELECT COALESCE(SUM(created_at >= ?), 0), COALESCE(SUM(created_at < ?), 0) FROM prompts", (since, since)
+    ).fetchone()
+    return recent, earlier
+
+
+@dataclass
+class Rising:
+    mistake: RankedMistake
+    # How many more times the mistake occurred since the `since` time than its rate before it predicts, rounded.
+    above_usual: int
+
+
+def rising_mistake(conn: sqlite3.Connection, since: str) -> Rising | None:
+    """Return the mistake that occurred most above its usual rate in the prompts sent at `since` or later: its
+    occurrences there minus the ones its rate in the earlier prompts predicts. It must occur at least twice there and
+    at least one time above that rate. None when no prompt was sent before `since`, which leaves no rate to compare."""
+    recent_prompts, earlier_prompts = _prompts_around(conn, since)
+    if earlier_prompts == 0:
+        return None
+    best: tuple[float, int, RankedMistake] | None = None
+    for o in _ranked(conn, "WHERE recent >= 2 ORDER BY latest_id DESC", since=since):
+        above = o.recent - (o.count - o.recent) * recent_prompts / earlier_prompts
+        if above >= 1 and (best is None or (above, o.recent) > best[:2]):
+            best = (above, o.recent, o)
+    return None if best is None else Rising(best[2], round(best[0]))
+
+
+def fading_mistake(conn: sqlite3.Connection, threshold: int, since: str) -> RankedMistake | None:
+    """Return the most frequent recurring mistake (a counter of `threshold` or more) that no prompt sent at `since` or
+    later made. None when no prompt was sent since then, which shows nothing about the mistake."""
+    if _prompts_around(conn, since)[0] == 0:
+        return None
+    found = _ranked(
+        conn,
+        "WHERE n >= :threshold AND recent = 0 ORDER BY n DESC, latest_id DESC LIMIT 1",
+        threshold=threshold,
+        since=since,
+    )
+    return found[0] if found else None
+
+
+@dataclass
+class Totals:
+    mistakes: int
+    prompts: int
+    clean_prompts: int
+    recurring: int
+
+
+def totals(conn: sqlite3.Connection, threshold: int) -> Totals:
+    """Count every saved occurrence, every saved prompt, the prompts with no mistake, and the mistakes whose counter
+    reaches `threshold`."""
+    row = conn.execute(
+        "SELECT (SELECT COUNT(*) FROM occurrences), (SELECT COUNT(*) FROM prompts),"
+        " (SELECT COUNT(*) FROM prompts p WHERE NOT EXISTS (SELECT 1 FROM occurrences o WHERE o.prompt_id = p.id)),"
+        " (SELECT COUNT(*) FROM (SELECT 1 FROM occurrences GROUP BY mistake_id HAVING COUNT(*) >= ?))",
+        (threshold,),
+    ).fetchone()
+    return Totals(*row)

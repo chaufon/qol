@@ -5,37 +5,57 @@ import type { On } from 'claude-code'
 import { toCheck } from './check'
 import { bandChips, cleanLine } from './draw'
 
+const ARTICLE = {
+  type: 'article',
+  type_label: 'article',
+  identifier: 'the',
+  original: 'a',
+  corrected: 'b',
+  reason: 'a known remote takes the',
+  count: 1,
+  is_recurring: false,
+  type_description: 'A wrong, missing or extra "a/an" or "the".',
+  type_example: '"the people are selfish" instead of "people are selfish"',
+}
+const MALFORMED = {
+  type: 'malformed_tense',
+  type_label: 'malformed tense',
+  identifier: 'does have',
+  original: 'c',
+  corrected: 'd',
+  reason: null,
+  count: 3,
+  is_recurring: true,
+  type_description: 'The right tense built wrong: auxiliaries missing, extra or in the wrong place.',
+  type_example: null,
+}
+
 const SAVE_OUTPUT = {
   corrected_prompt: 'What files does the mod folder have?',
-  occurrences: [
-    {
-      type: 'article',
-      type_label: 'article',
-      identifier: 'the',
-      original: 'a',
-      corrected: 'b',
-      reason: 'a known remote takes the',
-      count: 1,
-      is_recurring: false,
-      type_description: 'A wrong, missing or extra "a/an" or "the".',
-      type_example: '"the people are selfish" instead of "people are selfish"',
-    },
-    {
-      type: 'malformed_tense',
-      type_label: 'malformed tense',
-      identifier: 'does have',
-      original: 'c',
-      corrected: 'd',
-      reason: null,
-      count: 3,
-      is_recurring: true,
-      type_description: 'The right tense built wrong: auxiliaries missing, extra or in the wrong place.',
-      type_example: null,
-    },
-  ],
+  occurrences: [ARTICLE, MALFORMED],
   clean_streak: 0,
   best_before: 5,
 }
+
+const TYPE_FIELDS = {
+  type: MALFORMED.type,
+  type_label: MALFORMED.type_label,
+  type_description: MALFORMED.type_description,
+  type_example: MALFORMED.type_example,
+}
+const TOP_OUTPUT = {
+  totals: { mistakes: 40, prompts: 20, clean_prompts: 5, recurring: 1 },
+  mistakes: [
+    { ...MALFORMED, recent: 2 },
+    { ...ARTICLE, recent: 0 },
+  ],
+  focus: [
+    { kind: 'type', ...TYPE_FIELDS, rows: 2, count: 4 },
+    { kind: 'rising', ...TYPE_FIELDS, identifier: 'does have', recent: 2, above_usual: 1 },
+    { kind: 'fading', ...TYPE_FIELDS, identifier: 'did went' },
+  ],
+}
+const EMPTY_TOTALS = { mistakes: 0, prompts: 0, clean_prompts: 0, recurring: 0 }
 
 const TURN = { answer: 'reply', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 const BAND = {
@@ -70,7 +90,7 @@ function engine(on: On, stdout: string) {
     stdout,
     stderr: '',
     exitCode: 0,
-    top: JSON.stringify(SAVE_OUTPUT.occurrences),
+    top: JSON.stringify(TOP_OUTPUT),
     isTopBroken: false,
     runs: [] as (readonly string[])[],
     opened: [] as string[],
@@ -623,18 +643,23 @@ test('a check with no mistakes leaves an open pane open', async ($, on) => {
   expect(await pane.find({ text: '✓ No mistakes. A new streak starts.' })).toBeDefined()
 })
 
-test('a Top mistakes row opens and closes its example card', async ($, on) => {
+test("a Top mistakes row opens and closes its example card, with its type's rule", async ($, on) => {
   engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
-  expect(await pane.find({ text: /Malformed tense/ })).toBeDefined()
+  expect(await pane.find({ text: /^▸ {2}1 .*Malformed tense/ })).toBeDefined()
   expect(await pane.find({ text: '✗ c' })).toBeUndefined()
-  await $.ui.press({ plugin: 'grammar-tracker', key: 'row-1' })
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'row-0' })
+  expect(await pane.find({ text: /^▾ {2}1 / })).toBeDefined()
   expect(await pane.find({ text: '✗ c' })).toBeDefined()
   expect(await pane.find({ text: '✓ d' })).toBeDefined()
+  expect(await pane.find({ text: `→ ${MALFORMED.type_description}` })).toBeDefined()
   expect(await pane.find({ text: '✗ a' })).toBeUndefined()
   await $.ui.press({ plugin: 'grammar-tracker', key: 'row-1' })
+  expect(await pane.find({ text: '✗ c' })).toBeDefined()
+  expect(await pane.find({ text: '✗ a' })).toBeDefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'row-0' })
   expect(await pane.find({ text: '✗ c' })).toBeUndefined()
 })
 
@@ -648,13 +673,25 @@ test('after a /clear the band offers to hide the pane still up, and its Top mist
   expect(await pane.find({ text: /Malformed tense/ })).toBeDefined()
 })
 
-test('the Top mistakes tab says when nothing is logged', async ($, on) => {
+test('the Top mistakes tab says what will fill it when no prompt is checked', async ($, on) => {
   const calls = engine(on, '')
-  calls.top = '[]'
+  calls.top = JSON.stringify({ totals: EMPTY_TOTALS, mistakes: [], focus: [] })
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
-  expect(await pane.find({ text: 'No mistakes logged yet' })).toBeDefined()
+  expect(await pane.find({ text: 'The mistakes of your checked prompts will show here.' })).toBeDefined()
+})
+
+test('the Top mistakes tab praises checked prompts with no mistake', async ($, on) => {
+  const calls = engine(on, '')
+  const totals = { ...EMPTY_TOTALS, prompts: 4, clean_prompts: 4 }
+  calls.top = JSON.stringify({ totals, mistakes: [], focus: [] })
+  await pressBand($)
+  const pane = await $.ui.mount(PANE)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
+  expect(await pane.find({ text: '✓ No mistakes in 4 prompts.' })).toBeDefined()
+  const keys = (await pane.findAll({ type: 'Button' })).map(b => b.props.hotkey).filter(Boolean)
+  expect(keys).toEqual(['t', 'h'])
 })
 
 test('the scripts run with py -3 where python3 does not start, as on Windows', async ($, on) => {
@@ -746,30 +783,73 @@ test('a data folder that cannot be written shows its warning, and the prompt goe
   expect(calls.toasts).toEqual(['Grammar tracker: cannot write to the data folder /x'])
 })
 
-test('the Top mistakes tab shows the recurring mistake to watch, the stats and the share of each type', async ($, on) => {
+test('the Top mistakes tab shows four stats over every prompt, then the list under its caption', async ($, on) => {
   engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
-  expect(await pane.find({ text: '1 mistake you keep repeating.' })).toBeDefined()
-  expect(await pane.find({ text: /^Watch out for ".*" \(×3\)$/ })).toBeDefined()
-  const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text)
-  expect(texts).toEqual(
-    expect.arrayContaining([
-      '4',
-      'Mistakes',
-      'Recurring',
-      'Types',
-      'Where your mistakes go (top 2)',
-      '◴ 75%',
-      '  ª 25%',
-    ]),
+  const stats = (await pane.findAll({ type: 'Box' })).filter(
+    b => b.props.borderStyle === 'round' && b.props.alignItems === 'center',
   )
-  const counts = (await pane.findAll({ type: 'Text' })).filter(t => /^ \d+$/.test(t.text))
-  expect(counts.map(t => [t.text.trim(), t.props.color])).toEqual([
-    ['1', 'success'],
-    ['3', 'warning'],
+  expect(stats.map(t => t.text.replace(/\s+/g, ' ').trim())).toEqual([
+    '40Mistakes',
+    '20Prompts',
+    '1Recurring',
+    '25%Clean',
   ])
+  expect(await pane.find({ text: /^Top 2 · all time +\+N: last 7 days$/ })).toBeDefined()
+})
+
+test('the Top mistakes rows count the last 7 days, with a dash in success for none', async ($, on) => {
+  engine(on, '')
+  await pressBand($)
+  const pane = await $.ui.mount(PANE)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
+  const texts = await pane.findAll({ type: 'Text' })
+  expect(texts.find(t => t.text === '  +2')?.props.dimColor).toBe(true)
+  expect(texts.find(t => t.text === '   –')?.props.color).toBe('success')
+})
+
+test('Focus next lists the type, the rising mistake and the fading one, closed until pressed', async ($, on) => {
+  engine(on, '')
+  await pressBand($)
+  const pane = await $.ui.mount(PANE)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
+  expect(await pane.find({ text: /Focus next/ })).toBeDefined()
+  expect(await pane.find({ text: /^Malformed tense: 2 of your top 2, 4 times\.$/ })).toBeDefined()
+  expect(
+    await pane.find({
+      text: /^Malformed tense "does have": 2 times in the last 7 days, 1 more than your usual rate\.$/,
+    }),
+  ).toBeDefined()
+  const fading = /^Getting better: Malformed tense "did went" did not come back in the last 7 days\.$/
+  expect(await pane.find({ text: fading })).toBeDefined()
+  const marks = async () =>
+    (await pane.findAll({ type: 'Button' })).filter(b => /^[▸▾] [◴✓]$/.test(b.text)).map(b => b.text)
+  expect(await marks()).toEqual(['▸ ◴', '▸ ◴', '▸ ✓'])
+  const rules = async () => (await pane.findAll({ type: 'Text' })).filter(t => t.text.startsWith('→ ')).length
+  expect(await rules()).toBe(0)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'focus-rising' })
+  expect(await marks()).toEqual(['▸ ◴', '▾ ◴', '▸ ✓'])
+  expect(await rules()).toBe(1)
+})
+
+test('the footer key o opens every row and Focus next item, then closes them all', async ($, on) => {
+  engine(on, '')
+  await pressBand($)
+  const pane = await $.ui.mount(PANE)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
+  const keys = (await pane.findAll({ type: 'Button' })).map(b => b.props.hotkey).filter(Boolean)
+  expect(keys).toEqual(['t', 'h', 'o'])
+  expect(await pane.find({ text: 'Open all' })).toBeDefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'open-all' })
+  expect(await pane.find({ text: '✗ c' })).toBeDefined()
+  expect(await pane.find({ text: '✗ a' })).toBeDefined()
+  expect((await pane.findAll({ type: 'Text' })).filter(t => t.text.startsWith('→ ')).length).toBe(5)
+  expect(await pane.find({ text: 'Close all' })).toBeDefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'open-all' })
+  expect(await pane.find({ text: '✗ c' })).toBeUndefined()
+  expect(await pane.find({ text: 'Open all' })).toBeDefined()
 })
 
 test('the footer keys sit on the last row the pane shows, under a line', async ($, on) => {
@@ -809,9 +889,9 @@ test('the Top mistakes rows draw an icon and a bar as long as the count', async 
   const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text)
   expect(texts).toContain('ª')
   expect(texts).toContain('◴')
-  expect(texts).toContain('█'.repeat(10))
-  expect(texts).toContain('█'.repeat(3))
-  expect(texts).toContain('░'.repeat(7))
+  const rows = (await pane.findAll({ type: 'Button' })).filter(b => /^▸ +\d/.test(b.text)).map(b => b.text)
+  expect(rows[0]).toContain(`${'█'.repeat(10)} 3`)
+  expect(rows[1]).toContain(`${'█'.repeat(3)}${'░'.repeat(7)} 1`)
 })
 
 test('the Last prompt tab shows four stats: mistakes, recurring, the streak and the best streak', async ($, on) => {

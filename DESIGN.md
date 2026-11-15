@@ -59,7 +59,7 @@ recipe it needs into its own `hooks/`. What the engine allows (elements, props, 
 | `─` | rule across the pane, dim |
 | `╌` | divider inside a card, before a section the person opened, dim |
 | `█` / `░` | bar fill / bar track (track dim) |
-| `–` | no value |
+| `–` | no value, or none in a count column, in `success` when none is good (Top mistakes' last 7 days) |
 | `×N` | a count of times (the `×` sign, not the letter x) |
 | `…` | truncated text, or work in progress (`Loading…`, `Checking…`) |
 
@@ -188,7 +188,8 @@ Tab  Hide
 
 `grammar-tracker` `topRow`, `usage-footer` `bar`
 
-- A bar is a fixed number of cells: the filled part in `█` colored by meaning, the rest in `░`, dim.
+- A bar is a fixed number of cells: the filled part in `█`, the rest in `░`, dim. The fill is colored by meaning, or
+  plain where every bar would get the same color (every Top mistakes row is recurring).
 - A non-zero value fills at least one cell.
 - A bar split by category takes its cells by largest remainder, so the parts add up to the bar's width.
 
@@ -233,5 +234,3 @@ Where the mods differ from this file today:
   line look.
 - **grammar-tracker**:
   - Ends some empty states with a period and some without.
-  - Opens a row with `▾` or a blank instead of `▸` / `▾`.
-  - The Top mistakes tab spaces blocks with `marginTop` on each block instead of `gap` on their column.

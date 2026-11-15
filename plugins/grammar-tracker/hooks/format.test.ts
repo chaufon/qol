@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { barFill, cell, countColumn, meter, mistakeColumn, shareCells, typeColor, typeIcon, wordDiff } from './format'
+import { RECENT_WIDTH, barFill, cell, countColumn, meter, rowColumns, typeColor, typeIcon, wordDiff } from './format'
 
 test('cell cuts or pads a table cell and the Count column fits the largest count', () => {
   expect(cell('article', 4)).toBe('art…')
@@ -9,12 +9,17 @@ test('cell cuts or pads a table cell and the Count column fits the largest count
   expect(countColumn(123456)).toBe(6)
 })
 
-test('a Top mistakes row with the largest count fits the pane', () => {
-  for (const largest of [7, 68, 512, 123456]) {
-    const mistake = cell('the', mistakeColumn(80, largest))
-    const row = `▾${'10'.padStart(3)} ª ${cell('Article', 15)}  ${mistake} ${'█'.repeat(10)} ${String(largest).padStart(countColumn(largest))}`
-    expect(row.length).toBe(80)
+test('a Top mistakes row with the largest count fits the pane, the Type column narrowing first', () => {
+  for (const width of [80, 48]) {
+    for (const largest of [7, 68, 512, 123456]) {
+      const columns = rowColumns(width, largest)
+      const count = String(largest).padStart(countColumn(largest))
+      const row = `▾${'10'.padStart(3)} ª ${cell('Missing subject', columns.type)}  ${cell('the', columns.mistake)} ${'█'.repeat(10)} ${count}${'+25'.padStart(RECENT_WIDTH)}`
+      expect(row.length).toBe(width)
+    }
   }
+  expect(rowColumns(80, 146)).toEqual({ type: 15, mistake: 37 })
+  expect(rowColumns(48, 146)).toEqual({ type: 12, mistake: 8 })
 })
 
 test('meter and barFill scale a count', () => {
@@ -37,14 +42,6 @@ test('every mistake type has an icon and a color, and an unknown type uses the "
   expect(typeColor('pronoun')).not.toBe(typeColor('other'))
   expect(typeIcon('nope')).toBe(typeIcon('other'))
   expect(typeColor('nope')).toBe(typeColor('other'))
-})
-
-test('shareCells splits a bar by share, one cell at least, and fills the bar', () => {
-  expect(shareCells([3, 1], 8)).toEqual([6, 2])
-  expect(shareCells([59, 31, 22, 17, 12, 9, 6, 4], 68).reduce((a, b) => a + b, 0)).toBe(68)
-  expect(shareCells([100, 1, 1], 10)).toEqual([8, 1, 1])
-  expect(shareCells([1, 1, 1], 2)).toEqual([1, 1])
-  expect(shareCells([], 10)).toEqual([])
 })
 
 /** A diffed sentence written with the changed runs in brackets. */

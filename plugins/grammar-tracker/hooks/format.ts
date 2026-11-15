@@ -1,11 +1,16 @@
 export const ACCENT = 'planMode'
-export const TYPE_WIDTH = 15
 export const BAR_WIDTH = 10
+/** The widest and the narrowest Type column of a Top mistakes row, and the narrowest Mistake column. */
+const TYPE_WIDTH = 15
+const MIN_TYPE = 6
+const MIN_MISTAKE = 8
+/** The column of a Top mistakes row that counts the mistake's occurrences in the last 7 days (" +25"). */
+export const RECENT_WIDTH = 4
 /**
- * The columns of a Top mistakes row besides the mistake and the count: the open mark, the rank, the icon, the type, the
- * gaps and the bar ("▾  3 ∅ Missing subject  <mistake> ██████░░░░ <count>").
+ * The columns of a Top mistakes row besides the type, the mistake and the count: the open mark, the rank, the icon, the
+ * gaps, the bar and the last 7 days ("▸  3 ∅ <type>  <mistake> ██████░░░░ <count> +25").
  */
-const ROW_FIXED = 1 + 3 + 1 + 1 + 1 + TYPE_WIDTH + 2 + 1 + BAR_WIDTH + 1
+const ROW_FIXED = 1 + 3 + 1 + 1 + 1 + 2 + 1 + BAR_WIDTH + 1 + RECENT_WIDTH
 
 export function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`
@@ -25,9 +30,15 @@ export function countColumn(largest: number): number {
   return String(largest).length
 }
 
-/** The width of the Mistake column in a Top mistakes row, so the row fits the pane on one line. */
-export function mistakeColumn(paneWidth: number, largest: number): number {
-  return Math.max(8, paneWidth - ROW_FIXED - countColumn(largest))
+/**
+ * The widths of the Type and Mistake columns of a Top mistakes row, so the row fits the pane on one line. The Mistake
+ * column takes the room left; in a narrow pane the Type column gives up cells before the Mistake column goes under its
+ * narrowest.
+ */
+export function rowColumns(paneWidth: number, largest: number): { type: number; mistake: number } {
+  const room = paneWidth - ROW_FIXED - countColumn(largest)
+  const type = Math.max(MIN_TYPE, Math.min(TYPE_WIDTH, room - MIN_MISTAKE))
+  return { type, mistake: Math.max(MIN_MISTAKE, room - type) }
 }
 
 /** One single-width glyph and one theme color per mistake type; a type with none uses the "other" ones. */
@@ -91,32 +102,6 @@ export function meter(count: number): string {
 /** A bar of BAR_WIDTH cells in which `count` fills its share of `largest`, and at least one cell. */
 export function barFill(count: number, largest: number): number {
   return Math.min(BAR_WIDTH, Math.max(1, Math.round((count / largest) * BAR_WIDTH)))
-}
-
-/**
- * The cells of a bar of `cells` cells that each count fills by its share of the sum, at least one cell each, and as many
- * cells as the bar has in all. A count with no cell left is dropped.
- */
-export function shareCells(counts: number[], cells: number): number[] {
-  const kept = counts.slice(0, cells)
-  const total = kept.reduce((sum, n) => sum + n, 0)
-  if (total === 0) return []
-  const exact = kept.map(n => (n / total) * cells)
-  const widths = exact.map(x => Math.max(1, Math.floor(x)))
-  const shortfall = (i: number) => (exact[i] ?? 0) - (widths[i] ?? 0)
-  let used = widths.reduce((sum, n) => sum + n, 0)
-  while (used < cells) {
-    const n = widths.reduce((best, _, i) => (shortfall(i) > shortfall(best) ? i : best), 0)
-    widths[n] = (widths[n] ?? 0) + 1
-    used++
-  }
-  while (used > cells) {
-    const n = widths.reduce((best, w, i) => (w > 1 && (best < 0 || -shortfall(i) > -shortfall(best)) ? i : best), -1)
-    if (n < 0) break
-    widths[n] = (widths[n] ?? 0) - 1
-    used--
-  }
-  return widths
 }
 
 /** A run of a sentence: words that differ from the other sentence of a correction have `isChanged`. */

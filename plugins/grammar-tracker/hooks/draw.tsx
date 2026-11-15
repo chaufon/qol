@@ -1,18 +1,17 @@
 import type { Elements } from 'claude-code'
 
-import type { GrammarCheck, Occurrence, PaneTab, TopMistakes } from '../types'
+import type { Focus, GrammarCheck, Occurrence, PaneTab, TopMistake, TopMistakes, TopReport, TopTotals } from '../types'
 import {
   ACCENT,
   BAR_WIDTH,
-  TYPE_WIDTH,
+  RECENT_WIDTH,
   barFill,
   capitalize,
   cell,
   countColumn,
   meter,
-  mistakeColumn,
+  rowColumns,
   plural,
-  shareCells,
   typeColor,
   typeIcon,
   wordDiff,
@@ -33,6 +32,11 @@ const SHOW_RULE = '▸ Show rule'
 const HIDE_RULE = '▾ Hide rule'
 const SHOW_RULES = 'Show rules'
 const HIDE_RULES = 'Hide rules'
+const OPEN_ALL = 'Open all'
+const CLOSE_ALL = 'Close all'
+const TOP_EMPTY = 'The mistakes of your checked prompts will show here.'
+const RECENT_CAPTION = '+N: last 7 days'
+const FOCUS_TITLE = 'Focus next'
 /** How close to the best streak, in prompts still needed to beat it, the clean line starts counting down. */
 const NEAR_BEST = 3
 
@@ -102,7 +106,8 @@ export interface PaneProps {
   check: GrammarCheck | null
   isPending: boolean
   top: TopMistakes
-  openRow: string | null
+  /** The open rows and Focus next items of the Top mistakes tab, by id. */
+  openRows: string[]
   /** Whether the cards show their type's rule, except the cards whose own button turned it the other way. */
   isRulesShown: boolean
   /** The cards of the Last prompt tab whose button turned their rule the other way, by `cardId`. */
@@ -112,7 +117,10 @@ export interface PaneProps {
 export interface PaneActions {
   showTab: (id: PaneTab) => Promise<void>
   hide: () => Promise<void>
+  /** Opens or closes one row or Focus next item of the Top mistakes tab. */
   toggleRow: (id: string) => Promise<void>
+  /** Opens every row and Focus next item of the Top mistakes tab, by id, or closes them all when any is open. */
+  toggleAll: (ids: string[]) => Promise<void>
   /** Shows or hides the type's rule on every card. */
   toggleRules: () => Promise<void>
   /** Shows or hides the type's rule on one card, by `cardId`. */
@@ -172,10 +180,6 @@ function card(
   )
 }
 
-function fitsBorder(title: string, width: number): boolean {
-  return title.length + 2 <= width - 4
-}
-
 function runs({ Text }: Ui, parts: Segment[], color: string, changedColor: string): El[] {
   return parts.map((part, n) =>
     part.isChanged ? (
@@ -211,10 +215,6 @@ function sentences(ui: Ui, o: Occurrence): El[] {
         ]
       : []),
   ]
-}
-
-function example(o: Occurrence): string {
-  return o.typeExample ? `Example: ${o.typeExample}` : ''
 }
 
 function stat({ Box, Text }: Ui, id: string, value: string, label: string, color: string | undefined, width: number) {
@@ -318,136 +318,189 @@ function lastTab(ui: Ui, p: PaneProps, check: Mistakes, actions: PaneActions): E
   )
 }
 
-/** The share of each mistake type in the sum of the counters, largest first. */
-function typeShares(mistakes: Occurrence[]): [string, number][] {
-  const byType = new Map<string, number>()
-  for (const o of mistakes) byType.set(o.type, (byType.get(o.type) ?? 0) + o.count)
-  return [...byType.entries()].sort((a, b) => b[1] - a[1])
+/** The id of a Top mistakes row, which opens its example card. */
+function rowId(o: TopMistake): string {
+  return `${o.type}:${o.identifier}`
 }
 
-/** The legend under the share bar: the icon and percentage of as many types as fit on one line. */
-function legendItems(types: [string, number][], total: number, width: number): { type: string; text: string }[] {
-  const items: { type: string; text: string }[] = []
-  let used = 0
-  for (const [type, n] of types) {
-    const text = `${typeIcon(type)} ${String(Math.round((n / total) * 100))}%`
-    const gap = items.length > 0 ? 2 : 0
-    if (used + gap + text.length > width) break
-    used += gap + text.length
-    items.push({ type, text })
-  }
-  return items
+/** The id of a Focus next item, which opens its type's rule. */
+function focusId(f: Focus): string {
+  return `focus:${f.kind}`
+}
+
+/** The ids of everything the Top mistakes tab can open, for the footer key that opens or closes them all. */
+function openableIds(report: TopReport): string[] {
+  return [...report.mistakes.map(rowId), ...report.focus.map(focusId)]
 }
 
 function topRow(
   ui: Ui,
-  o: Occurrence,
+  o: TopMistake,
   n: number,
-  columns: { mistake: number; count: number; largest: number },
+  columns: { type: number; mistake: number; count: number; largest: number },
   isOpen: boolean,
   onPress: () => Promise<void>,
 ): El {
   const { Button, Text } = ui
-  const color = o.isRecurring ? 'warning' : 'success'
   const filled = barFill(o.count, columns.largest)
   return (
     <Button key={`row-${n}`} plain onPress={onPress}>
-      {`${isOpen ? '▾' : ' '}${String(n + 1).padStart(3)} `}
+      {`${isOpen ? '▾' : '▸'}${String(n + 1).padStart(3)} `}
       <Text color={typeColor(o.type)}>{typeIcon(o.type)}</Text>
-      {` ${cell(capitalize(o.typeLabel), TYPE_WIDTH)}  ${cell(o.identifier, columns.mistake)} `}
-      <Text color={color}>{'█'.repeat(filled)}</Text>
+      {` ${cell(capitalize(o.typeLabel), columns.type)}  ${cell(o.identifier, columns.mistake)} `}
+      {'█'.repeat(filled)}
       <Text dimColor>{'░'.repeat(BAR_WIDTH - filled)}</Text>
-      <Text color={color}>{` ${String(o.count).padStart(columns.count)}`}</Text>
+      {` ${String(o.count).padStart(columns.count)}`}
+      {o.recent > 0 ? (
+        <Text dimColor>{`+${o.recent}`.padStart(RECENT_WIDTH)}</Text>
+      ) : (
+        <Text color="success">{'–'.padStart(RECENT_WIDTH)}</Text>
+      )}
     </Button>
   )
 }
 
-function topTab(ui: Ui, width: number, mistakes: Occurrence[], openRow: string | null, actions: PaneActions): El {
-  const { Box, Text } = ui
-  const byCount = mistakes.toSorted((a, b) => b.count - a.count)
-  const mostFrequent = byCount[0]
-  if (mostFrequent === undefined) return <Text dimColor>No mistakes logged yet</Text>
-  const watch = byCount.find(o => o.isRecurring)
-  const recurring = mistakes.filter(o => o.isRecurring).length
-  const largest = mostFrequent.count
-  const columns = { mistake: mistakeColumn(width, largest), count: countColumn(largest), largest }
-  const cardWidth = width - 2
-  const total = mistakes.reduce((sum, o) => sum + o.count, 0)
-  const statWidth = Math.floor((width - 2) / 3)
-  const types = typeShares(mistakes)
-  const cells = shareCells(
-    types.map(([, n]) => n),
-    width - 2,
-  )
-  const shown = watch ?? mostFrequent
-  const subline = `${watch ? 'Watch out for' : 'Most frequent:'} "${shown.identifier}" (×${shown.count})`
+/** A dim line with `left` at its start and `right` at its end. */
+function caption({ Text }: Ui, key: string, left: string, right: string, width: number): El {
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="column" marginTop={1}>
-        <Text weight="semibold" color={recurring > 0 ? 'warning' : 'success'}>
-          {recurring > 0 ? `${plural(recurring, 'mistake')} you keep repeating.` : 'No mistake you keep repeating.'}
+    <Text key={key} dimColor>
+      {left + ' '.repeat(Math.max(1, width - left.length - right.length)) + right}
+    </Text>
+  )
+}
+
+/** The line of a Focus next item: what the database found, in one sentence. */
+function focusLine(f: Focus, topSize: number): string {
+  const label = capitalize(f.typeLabel)
+  switch (f.kind) {
+    case 'type':
+      return `${label}: ${f.rows} of your top ${topSize}, ${plural(f.count, 'time')}.`
+    case 'rising':
+      return `${label} "${f.identifier}": ${plural(f.recent, 'time')} in the last 7 days, ${f.aboveUsual} more than your usual rate.`
+    case 'fading':
+      return `Getting better: ${label} "${f.identifier}" did not come back in the last 7 days.`
+  }
+}
+
+function focusCard(ui: Ui, report: TopReport, width: number, openRows: string[], actions: PaneActions): El {
+  const { Box, Button, Text } = ui
+  const body = report.focus.flatMap(f => {
+    const id = focusId(f)
+    const isOpen = openRows.includes(id)
+    const isFading = f.kind === 'fading'
+    const rule = `${f.typeDescription}${f.typeExample ? ` (${f.typeExample})` : ''}`
+    const toggle = () => actions.toggleRow(id)
+    return [
+      // The mark and the icon sit in a column of their own, so a long line wraps under its text.
+      <Box key={`focus-${f.kind}`}>
+        <Box width={4} flexShrink={0}>
+          <Button key={`focus-${f.kind}-mark`} plain onPress={toggle}>
+            {`${isOpen ? '▾' : '▸'} `}
+            <Text color={isFading ? 'success' : typeColor(f.type)}>{isFading ? '✓' : typeIcon(f.type)}</Text>
+          </Button>
+        </Box>
+        <Box flexGrow={1} flexShrink={1}>
+          <Button key={`focus-${f.kind}`} plain onPress={toggle}>
+            {focusLine(f, report.mistakes.length)}
+          </Button>
+        </Box>
+      </Box>,
+      ...(isOpen
+        ? [
+            <Box key={`rule-${f.kind}`} paddingLeft={4}>
+              <Text dimColor>→ {rule}</Text>
+            </Box>,
+          ]
+        : []),
+    ]
+  })
+  return card(ui, 'focus', FOCUS_TITLE, width, 'warning', body)
+}
+
+function topStats(ui: Ui, totals: TopTotals, width: number): El {
+  const { Box } = ui
+  const statWidth = Math.floor((width - 3) / 4)
+  const clean = totals.prompts === 0 ? '–' : `${String(Math.round((totals.cleanPrompts / totals.prompts) * 100))}%`
+  return (
+    <Box key="stats" gap={1}>
+      {stat(ui, 'mistakes', String(totals.mistakes), 'Mistakes', totals.mistakes > 0 ? 'error' : 'success', statWidth)}
+      {stat(ui, 'prompts', String(totals.prompts), 'Prompts', undefined, statWidth)}
+      {stat(
+        ui,
+        'recurring',
+        String(totals.recurring),
+        'Recurring',
+        totals.recurring > 0 ? 'warning' : 'success',
+        statWidth,
+      )}
+      {stat(ui, 'clean', clean, 'Clean', totals.cleanPrompts > 0 ? 'success' : undefined, statWidth)}
+    </Box>
+  )
+}
+
+function topTab(ui: Ui, width: number, report: TopReport, openRows: string[], actions: PaneActions): El {
+  const { Box, Text } = ui
+  const { totals, mistakes } = report
+  if (totals.prompts === 0) return <Text dimColor>{TOP_EMPTY}</Text>
+  const stats = topStats(ui, totals, width)
+  const largest = mistakes[0]?.count
+  if (largest === undefined) {
+    return (
+      <Box flexDirection="column" gap={1} paddingTop={1}>
+        {stats}
+        <Text key="clean" weight="semibold" color="success">
+          {`✓ No mistakes in ${plural(totals.prompts, 'prompt')}.`}
         </Text>
-        <Text dimColor>{subline}</Text>
       </Box>
-      <Box gap={1} marginTop={1}>
-        {stat(ui, 'mistakes', String(total), 'Mistakes', 'error', statWidth)}
-        {stat(ui, 'recurring', String(recurring), 'Recurring', recurring > 0 ? 'warning' : 'success', statWidth)}
-        {stat(ui, 'types', String(types.length), 'Types', undefined, statWidth)}
+    )
+  }
+  const columns = { ...rowColumns(width, largest), count: countColumn(largest), largest }
+  const cardWidth = width - 2
+  const list = mistakes.map((o, n) => {
+    const id = rowId(o)
+    const isOpen = openRows.includes(id)
+    const row = topRow(ui, o, n, columns, isOpen, () => actions.toggleRow(id))
+    if (!isOpen) return row
+    const title = `${typeIcon(o.type)} ${capitalize(o.typeLabel)} · "${o.identifier}"`
+    const body = [...sentences(ui, o), ...ruleSection(ui, o, cardWidth, 'inactive')]
+    return (
+      <Box key={`mistake-${n}`} flexDirection="column">
+        {row}
+        <Box marginLeft={2}>{card(ui, 'example', title, cardWidth, 'inactive', body)}</Box>
       </Box>
-      <Box marginTop={1}>
-        <Text dimColor>{`Where your mistakes go (top ${mistakes.length})`}</Text>
+    )
+  })
+  return (
+    <Box flexDirection="column" gap={1} paddingTop={1}>
+      {stats}
+      <Box key="top" flexDirection="column">
+        {caption(ui, 'caption', `Top ${mistakes.length} · all time`, RECENT_CAPTION, width)}
+        {list}
       </Box>
-      <Text>
-        {cells.map((n, i) => (
-          <Text key={String(i)} color={typeColor(types[i]?.[0] ?? 'other')}>
-            {'█'.repeat(n)}
-          </Text>
-        ))}
-      </Text>
-      <Text>
-        {legendItems(types, total, width - 2).map((item, i) => (
-          <Text key={item.type} color={typeColor(item.type)}>{`${i > 0 ? '  ' : ''}${item.text}`}</Text>
-        ))}
-      </Text>
-      <Text> </Text>
-      {mistakes.map((o, n) => {
-        const id = `${o.type}:${o.identifier}`
-        const isOpen = openRow === id
-        const row = topRow(ui, o, n, columns, isOpen, () => actions.toggleRow(id))
-        if (!isOpen) return row
-        const rule = fitsBorder(o.typeDescription, cardWidth) ? example(o) : `${o.typeDescription} ${example(o)}`
-        const body = [
-          ...(rule.trim()
-            ? [
-                <Text key="rule" dimColor>
-                  {rule.trim()}
-                </Text>,
-              ]
-            : []),
-          ...sentences(ui, o),
-        ]
-        return (
-          <Box key={`mistake-${n}`} flexDirection="column">
-            {row}
-            <Box marginLeft={2} marginTop={1} marginBottom={1}>
-              {card(ui, 'example', o.typeDescription, cardWidth, o.isRecurring ? 'warning' : 'inactive', body)}
-            </Box>
-          </Box>
-        )
-      })}
+      {report.focus.length > 0 ? focusCard(ui, report, width, openRows, actions) : null}
     </Box>
   )
 }
 
 /**
  * The keys, on the last row the pane shows, under a line: the pane has no footer of its own, so the two rows move with
- * the scroll. The Last prompt tab adds the key that shows or hides the type's rule on every card.
+ * the scroll. The Last prompt tab adds the key that shows or hides the type's rule on every card, and the Top mistakes
+ * tab the key that opens or closes every row and Focus next item.
  */
+function openAllKey(report: TopReport, openRows: string[], actions: PaneActions): Key {
+  const ids = openableIds(report)
+  const isAnyOpen = ids.some(id => openRows.includes(id))
+  return ['open-all', 'o', isAnyOpen ? CLOSE_ALL : OPEN_ALL, () => actions.toggleAll(ids)]
+}
+
 function footer({ Box, Button, Text }: Ui, p: PaneProps, actions: PaneActions): El {
   const keys: Key[] = [
     ['tab-next', 't', 'Tab', () => actions.showTab(p.tab === 'last' ? 'top' : 'last')],
     ['hide', 'h', 'Hide', actions.hide],
     ...(p.tab === 'last' ? [['rules', 'r', p.isRulesShown ? HIDE_RULES : SHOW_RULES, actions.toggleRules] as Key] : []),
+    ...(p.tab === 'top' && p.top !== null && !('error' in p.top) && p.top.mistakes.length > 0
+      ? [openAllKey(p.top, p.openRows, actions)]
+      : []),
   ]
   const used = keys.reduce((n, [, hotkey, label]) => n + hotkey.length + label.length + 4, 0)
   return (
@@ -477,7 +530,7 @@ function tabBody(ui: Ui, p: PaneProps, actions: PaneActions): El {
   if (p.tab === 'top') {
     if (p.top === null) return <Text dimColor>Loading…</Text>
     if ('error' in p.top) return <Text color="error">{p.top.error}</Text>
-    return topTab(ui, p.width, p.top.mistakes, p.openRow, actions)
+    return topTab(ui, p.width, p.top, p.openRows, actions)
   }
   if (p.isPending) return <Text color={ACCENT}>{CHECKING_PANE}</Text>
   if (p.check === null) return <Text dimColor>No grammar check for the last prompt.</Text>

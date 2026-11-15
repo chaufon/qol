@@ -5,12 +5,16 @@ from lib.db import (
     VERSION,
     NewerDatabaseError,
     Streak,
+    Totals,
     active_types,
     all_types,
     connect,
+    fading_mistake,
+    rising_mistake,
     save_check,
     streak_of,
     top_mistakes,
+    totals,
 )
 from lib.mistake_types import ADDED_IN_2, ADDED_IN_6, ROMANCE_TEXTS_5, SPANISH_TEXTS_4, WORD_CHOICE_1
 from lib.transcript import Check, Mistake
@@ -527,3 +531,66 @@ def test_migration_from_6_counts_the_streak_of_every_saved_prompt(tmp_path):
     conn = connect(path)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
     assert streaks(conn) == [1, 0, 1, 2]
+
+
+def test_top_mistakes_count_the_occurrences_since_a_time(tmp_path):
+    conn = connect(tmp_path / "g.db")
+    save_at(conn, "p1", "2026-11-01T12:00:00.000Z", m("article", "the", 1))
+    save_at(conn, "p2", "2026-11-10T12:00:00.000Z", m("article", "the", 2), m("spelling", "necessity", 3))
+    [the, necessity] = top_mistakes(conn, 10, "2026-11-08T00:00:00.000Z")
+    assert (the.identifier, the.count, the.recent) == ("the", 2, 1)
+    assert (necessity.identifier, necessity.recent) == ("necessity", 1)
+
+
+SINCE = "2026-11-08T00:00:00.000Z"
+
+
+def test_rising_mistake_is_the_one_most_above_its_usual_rate(tmp_path):
+    conn = connect(tmp_path / "g.db")
+    # Before: 4 prompts, "the" in each. Since: 2 prompts, "the" in each (as usual), "necessity" in each (new).
+    for n in range(4):
+        save_at(conn, f"old{n}", f"2026-11-01T12:00:0{n}.000Z", m("article", "the", n))
+    for n in range(2):
+        save_at(conn, f"new{n}", f"2026-11-10T12:00:0{n}.000Z", m("article", "the", n), m("spelling", "necessity", n))
+    rising = rising_mistake(conn, SINCE)
+    assert rising is not None
+    assert (rising.mistake.identifier, rising.mistake.recent, rising.above_usual) == ("necessity", 2, 2)
+
+
+def test_rising_mistake_needs_two_occurrences_one_above_the_rate_and_earlier_prompts(tmp_path):
+    conn = connect(tmp_path / "g.db")
+    save_at(conn, "new0", "2026-11-10T12:00:00.000Z", m("spelling", "necessity", 0))
+    save_at(conn, "new1", "2026-11-10T12:00:01.000Z", m("spelling", "necessity", 1))
+    assert rising_mistake(conn, SINCE) is None
+    save_at(conn, "old0", "2026-11-01T12:00:00.000Z", m("spelling", "necessity", 2))
+    assert rising_mistake(conn, SINCE) is None
+    save_at(conn, "old1", "2026-11-01T12:00:01.000Z")
+    save_at(conn, "old2", "2026-11-01T12:00:02.000Z")
+    save_at(conn, "old3", "2026-11-01T12:00:03.000Z")
+    rising = rising_mistake(conn, SINCE)
+    assert rising is not None
+    assert (rising.mistake.identifier, rising.above_usual) == ("necessity", 2)
+
+
+def test_fading_mistake_is_the_most_frequent_recurring_one_no_recent_prompt_made(tmp_path):
+    conn = connect(tmp_path / "g.db")
+    for n in range(4):
+        save_at(conn, f"a{n}", f"2026-11-01T12:00:0{n}.000Z", m("article", "the", n))
+    for n in range(3):
+        save_at(conn, f"b{n}", f"2026-11-02T12:00:0{n}.000Z", m("spelling", "necessity", n))
+    save_at(conn, "c", "2026-11-03T12:00:00.000Z", m("preposition", "depend on", 1))
+    assert fading_mistake(conn, 3, SINCE) is None
+    save_at(conn, "new", "2026-11-10T12:00:00.000Z", m("article", "the", 9))
+    fading = fading_mistake(conn, 3, SINCE)
+    assert fading is not None
+    assert (fading.identifier, fading.count) == ("necessity", 3)
+
+
+def test_totals_count_mistakes_prompts_clean_prompts_and_recurring_mistakes(tmp_path):
+    conn = connect(tmp_path / "g.db")
+    assert totals(conn, 3) == Totals(0, 0, 0, 0)
+    for n in range(3):
+        save_at(conn, f"p{n}", f"2026-11-01T12:00:0{n}.000Z", m("article", "the", n), m("spelling", "necessity", n))
+    save_at(conn, "clean", "2026-11-02T12:00:00.000Z")
+    save_at(conn, "once", "2026-11-03T12:00:00.000Z", m("preposition", "depend on", 1))
+    assert totals(conn, 3) == Totals(7, 5, 1, 2)

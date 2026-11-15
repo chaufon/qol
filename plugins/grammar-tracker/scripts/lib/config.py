@@ -18,6 +18,9 @@ ERROR_LOG = HOME / "errors.log"
 # A mistake is recurring once its counter, across all prompts, reaches this value.
 RECURRING_THRESHOLD = 3
 
+# The Top mistakes tab counts each mistake's occurrences in the prompts of this many last days.
+RECENT_DAYS = 7
+
 # The values of the mod's native_language option, the first one its default. They match the options of
 # userConfig.native_language in .claude-plugin/plugin.json.
 NATIVE_LANGUAGES = ("Spanish", "Portuguese", "French", "Italian")

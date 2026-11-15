@@ -17,9 +17,12 @@ language make in English, such as calques and false friends.
   example, is one key or click away.
 - **The corrected prompt**, rewritten in natural English.
 - **Recurring mistakes.** Every mistake has a counter across all your prompts. From the third time, the mod marks it
-  as recurring and tells you which one to watch out for.
+  as recurring.
 - **Progress.** A streak of prompts in a row with no mistakes, across every conversation, next to your best streak,
-  and a ranking of your top 10 mistakes with the share of each type.
+  and a ranking of your top 10 mistakes with how often each came back in the last 7 days.
+- **What to focus on.** The mistake type that fills most of your top 10, the mistake that rose most above your usual
+  rate in the last 7 days, and a recurring mistake you did not make in the last 7 days, each with the rule to
+  remember.
 - **Dictation-aware.** Filler words, false starts and missing punctuation from voice input are not counted as
   mistakes.
 - **Local and private.** Your history is stored in a SQLite file on your machine. The mod calls no service besides the
@@ -59,11 +62,13 @@ Write prompts as usual.
   too short to check or not in English).
 - **The pane** opens by itself, without taking the focus, when a check finds mistakes. Open or close it with the
   band's `Show`/`Hide` button, or with `ctrl+x tab` then `g`. In the pane, `t` switches tabs, `r` shows or hides the
-  type's rule on every card, and `h` or Esc hides the pane.
+  type's rule on every card, `o` opens or closes every row of Top mistakes, and `h` or Esc hides the pane.
   - **Last prompt:** the mistakes, the recurring ones, your streak and your best streak; then one card per mistake,
     each with a `Show rule` button on its bottom border, and the corrected prompt. A prompt with no mistakes shows a
     line about your streak instead.
-  - **Top mistakes:** your 10 most frequent mistakes. Click a row to see its latest example.
+  - **Top mistakes:** your mistakes, your checked prompts, your recurring mistakes and the share of clean prompts,
+    over all time; then your 10 most frequent mistakes, each with its count in the last 7 days; then **Focus next**.
+    Click a row (`▸`) to see its latest example and its type's rule, and a Focus next item to see its rule.
 - **Skip the check** for one prompt by starting it with `Claude, do not grammar check` (or `don't grammar check`,
   `skip grammar check`, `no grammar check`).
 

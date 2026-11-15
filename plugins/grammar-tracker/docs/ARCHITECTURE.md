@@ -67,13 +67,13 @@ Claude's reply streams: label + grammar-json block + answer
 | `scripts/prompt_context.py` | Prints the grammar check instruction for a prompt |
 | `scripts/save_check.py` | Saves the reply's `grammar-json` block and prints the check with its counters |
 | `scripts/query.py` | Command-line queries on the database: `top`, `rekey` |
-| `scripts/lib/config.py` | Paths, native languages, the recurring threshold |
+| `scripts/lib/config.py` | Paths, native languages, the recurring threshold, the Top mistakes tab's 7 days |
 | `scripts/lib/db.py` | Schema, migrations, saving and querying |
 | `scripts/lib/mistake_types.py` | The text of every mistake type, and the texts the migrations replace |
 | `scripts/lib/instruction.py` | The instruction text |
 | `scripts/lib/transcript.py` | Reading Claude Code transcripts |
 | `scripts/lib/rekey.py` | Matching saved prompts to transcript entries |
-| `scripts/lib/report.py` | The JSON fields the hooks module reads |
+| `scripts/lib/report.py` | The JSON fields the hooks module reads, and the Top mistakes report |
 | `scripts/lib/errorlog.py` | Writing `errors.log` |
 
 ## Data
@@ -132,7 +132,17 @@ python3 scripts/query.py top [N]
 python3 scripts/query.py rekey
 ```
 
-- `top` prints the N mistakes with the largest counters (default 10) as JSON, each with its latest example.
+- `top` prints the Top mistakes tab as JSON:
+  - `totals`: the occurrences, the checked prompts, the prompts with no mistake, and the recurring mistakes.
+  - `mistakes`: the N mistakes with the largest counters (default 10), each with its latest example and `recent`, its
+    occurrences in the last `RECENT_DAYS = 7` days.
+  - `focus`: up to three items, in this order.
+    - `type`: the type with the most rows in `mistakes`, when it has two or more.
+    - `rising`: the mistake most above its usual rate in the last 7 days. Its usual rate is its occurrences per prompt
+      before those 7 days; `above_usual` is its occurrences in the 7 days minus what that rate predicts for the prompts
+      of the 7 days. It needs two occurrences in the 7 days, one above the rate, and prompts before the 7 days.
+    - `fading`: the recurring mistake with the largest counter that no prompt of the last 7 days made, when there are
+      prompts in those 7 days.
 - `rekey` stores the transcript uuid of each saved prompt that has none, by matching the text and the closest time.
   Prompts with no match are tried again on the next run.
 

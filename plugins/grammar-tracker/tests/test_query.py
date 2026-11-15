@@ -1,10 +1,12 @@
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 from conftest import ROOT, script_env
 from lib.db import VERSION, connect, save_check
 from lib.transcript import Check, Mistake
+from query import since
 
 
 def run(tmp_path, *args):
@@ -23,17 +25,19 @@ def test_unknown_command_fails(tmp_path):
 
 def test_top_on_empty_database(tmp_path):
     result = run(tmp_path, "top")
-    assert (result.returncode, json.loads(result.stdout)) == (0, [])
+    totals = {"mistakes": 0, "prompts": 0, "clean_prompts": 0, "recurring": 0}
+    assert (result.returncode, json.loads(result.stdout)) == (0, {"totals": totals, "mistakes": [], "focus": []})
 
 
-def test_top_marks_recurring_mistakes(tmp_path):
+def test_top_marks_recurring_mistakes_and_counts_the_last_7_days(tmp_path):
     conn = connect(tmp_path / "grammar.db")
-    for n in range(3):
+    now = datetime.now(timezone.utc)
+    for n, created_at in enumerate([since(now, 30), since(now, 2), since(now, 1)]):
         save_check(
             conn,
             turn_id=f"p{n}",
             session_id="s",
-            created_at="2026-10-18T12:00:00Z",
+            created_at=created_at,
             project_dir="/p",
             original="o",
             check=Check(
@@ -45,8 +49,10 @@ def test_top_marks_recurring_mistakes(tmp_path):
             ),
         )
     conn.close()
-    [mistake] = json.loads(run(tmp_path, "top").stdout)
-    assert (mistake["identifier"], mistake["count"], mistake["is_recurring"]) == ("the", 3, True)
+    report = json.loads(run(tmp_path, "top").stdout)
+    [mistake] = report["mistakes"]
+    assert (mistake["identifier"], mistake["count"], mistake["is_recurring"], mistake["recent"]) == ("the", 3, True, 2)
+    assert report["totals"] == {"mistakes": 3, "prompts": 3, "clean_prompts": 0, "recurring": 1}
     assert (mistake["original"], mistake["corrected"]) == ("now related.", "now the related.")
 
 

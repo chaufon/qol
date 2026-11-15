@@ -1,4 +1,4 @@
-import type { GrammarCheck, Occurrence } from '../types'
+import type { Focus, GrammarCheck, Occurrence, TopReport, TypeInfo } from '../types'
 
 export const CHECK_LABEL = '**English grammar check:**'
 const NOT_APPLY = 'English grammar check does not apply'
@@ -18,6 +18,25 @@ export interface OccurrenceFields {
   reason: string | null
   count: number
   is_recurring: boolean
+}
+
+interface TypeFields {
+  type: string
+  type_label: string
+  type_description: string
+  type_example: string | null
+}
+
+type FocusFields =
+  | (TypeFields & { kind: 'type'; rows: number; count: number })
+  | (TypeFields & { kind: 'rising'; identifier: string; recent: number; above_usual: number })
+  | (TypeFields & { kind: 'fading'; identifier: string })
+
+/** What `scripts/query.py top` prints. */
+export interface ReportFields {
+  totals: { mistakes: number; prompts: number; clean_prompts: number; recurring: number }
+  mistakes: (OccurrenceFields & { recent: number })[]
+  focus: FocusFields[]
 }
 
 /**
@@ -87,6 +106,34 @@ export function toOccurrence(o: OccurrenceFields): Occurrence {
     reason: o.reason,
     count: o.count,
     isRecurring: o.is_recurring,
+  }
+}
+
+function toTypeInfo(f: TypeFields): TypeInfo {
+  return { type: f.type, typeLabel: f.type_label, typeDescription: f.type_description, typeExample: f.type_example }
+}
+
+function toFocus(f: FocusFields): Focus {
+  switch (f.kind) {
+    case 'type':
+      return { ...toTypeInfo(f), kind: 'type', rows: f.rows, count: f.count }
+    case 'rising':
+      return { ...toTypeInfo(f), kind: 'rising', identifier: f.identifier, recent: f.recent, aboveUsual: f.above_usual }
+    case 'fading':
+      return { ...toTypeInfo(f), kind: 'fading', identifier: f.identifier }
+  }
+}
+
+export function toReport(r: ReportFields): TopReport {
+  return {
+    totals: {
+      mistakes: r.totals.mistakes,
+      prompts: r.totals.prompts,
+      cleanPrompts: r.totals.clean_prompts,
+      recurring: r.totals.recurring,
+    },
+    mistakes: r.mistakes.map(o => ({ ...toOccurrence(o), recent: o.recent })),
+    focus: r.focus.map(toFocus),
   }
 }
 
