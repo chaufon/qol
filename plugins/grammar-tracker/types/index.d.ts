@@ -33,6 +33,8 @@ declare module 'claude-code' {
       pending: boolean
       // True once the user hid the pane by hand, until the Show button opens it again. A check opens the pane only while it is false.
       manualHide: boolean
+      // The step of the icon's flip after a check lands: 0 shows "?", 3 shows the verdict and stays.
+      flipStep: number
     }
   }
 }

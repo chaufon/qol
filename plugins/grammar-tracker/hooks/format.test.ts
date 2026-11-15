@@ -12,7 +12,6 @@ import {
   typeColor,
   typeIcon,
 } from './format'
-import { mascotRows } from './mascot'
 
 test('cell cuts or pads a table cell and the Count column fits the largest count', () => {
   expect(cell('article', 4)).toBe('art…')
@@ -52,14 +51,6 @@ test('every mistake type has an icon and a color, and an unknown type uses the "
   expect(typeColor('pronoun')).not.toBe(typeColor('other'))
   expect(typeIcon('nope')).toBe(typeIcon('other'))
   expect(typeColor('nope')).toBe(typeColor('other'))
-})
-
-test('the mascot is four rows of ten cells, and its mouth turns down when worried', () => {
-  const text = (rows: ReturnType<typeof mascotRows>) => rows.map(row => row.map(run => run.text).join(''))
-  const happy = mascotRows('happy')
-  expect(happy.length).toBe(4)
-  expect(text(happy).map(row => row.length)).toEqual([10, 10, 10, 10])
-  expect(text(mascotRows('worried'))).not.toEqual(text(happy))
 })
 
 test('shareCells splits a bar by share, one cell at least, and fills the bar', () => {

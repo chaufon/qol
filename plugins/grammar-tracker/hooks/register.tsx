@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { GrammarCheck, PaneTab, TopMistakes } from '../types'
 import { checkState, stripCheck, toCheck, toOccurrence } from './check'
 import type { ContextOutput, OccurrenceFields, SaveOutput } from './check'
 import { drawBand, drawPane } from './draw'
 import type { PaneActions } from './draw'
+import { FLIP_MS, LAST_STEP } from './icon'
 import { runScript } from './python'
 
 const PANE = 'grammar'
@@ -19,6 +20,7 @@ const openRow = atom({ plugin: 'grammar-tracker', key: 'openRow' } as const, nul
 const pending = atom({ plugin: 'grammar-tracker', key: 'pending' } as const, false)
 const trend = atom({ plugin: 'grammar-tracker', key: 'trend' } as const, null as number[] | null)
 const manualHide = atom({ plugin: 'grammar-tracker', key: 'manualHide' } as const, false)
+const flipStep = atom({ plugin: 'grammar-tracker', key: 'flipStep' } as const, LAST_STEP as number)
 
 /**
  * The prompt of the turn in progress and what its reply has settled. 'waiting': the reply may still hold a check.
@@ -41,6 +43,8 @@ let isAutoOpenOn = true
 let nativeLanguage: string | undefined
 /** The load of the top mistakes in flight, so a pane drawn again while query.py runs does not start another. */
 let loadingTop: Promise<void> | undefined
+/** The timers of the icon's flip in progress, cancelled when another check lands before it ends. */
+let flipTimers: Timer[] = []
 
 function parseJson<T>(stdout: string, empty: T): T {
   return stdout.trim() ? (JSON.parse(stdout) as T) : empty
@@ -109,6 +113,17 @@ async function openPaneForCheck($: EngineInterface): Promise<void> {
   await openPane($, true)
 }
 
+/** Flips the icon's verdict square from "?" to the verdict, one step for each FLIP_MS entry. */
+async function flipIcon($: EngineInterface): Promise<void> {
+  for (const timer of flipTimers) timer.cancel()
+  await update($, flipStep, () => 0)
+  let due = 0
+  flipTimers = FLIP_MS.map((ms, n) => {
+    due += ms
+    return $.clock.after(due, () => void update($, flipStep, () => n + 1))
+  })
+}
+
 async function settle($: EngineInterface, check: GrammarCheck | null): Promise<void> {
   await update($, last, () => check)
   await update($, pending, () => false)
@@ -142,6 +157,7 @@ async function saveCheck($: EngineInterface, current: Turn, reply: string): Prom
     const check = toCheck(output)
     if (check) {
       await settle($, check)
+      if (!check.doesNotApply) await flipIcon($)
       if (!check.doesNotApply) await refreshTrend($)
       if (!check.doesNotApply && check.occurrences.length > 0) await openPaneForCheck($)
     } else {
@@ -265,6 +281,7 @@ export const register: Register = (on, options) => {
       top: await read($, top),
       trend: await read($, trend),
       openRow: row,
+      flipStep: await read($, flipStep),
     }
     return drawPane($.ui.resolve(e), props, paneActions($, row))
   })

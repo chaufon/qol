@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
@@ -64,6 +64,7 @@ const CHECK_TEXT = '**English grammar check:**\n```grammar-json\n{"mistakes": []
 
 function engine(on: On, stdout: string) {
   const calls = {
+    clock: mock.clock(on, { now: Date.parse('2026-10-17T12:00:00.000Z') }),
     stdout,
     stderr: '',
     exitCode: 0,
@@ -148,7 +149,6 @@ function engine(on: On, stdout: string) {
   })
   on('session.id', () => ({ value: 's1' }))
   on('session.cwd', () => ({ value: '/proj' }))
-  on('clock.now', () => ({ value: Date.parse('2026-10-17T12:00:00.000Z') }))
   on('prompt.submit', ($, e) => {
     calls.submits.push(e.context)
     return { text: e.text, context: e.context }
@@ -677,12 +677,13 @@ test('a data folder that cannot be written shows its warning, and the prompt goe
   expect(calls.toasts).toEqual(['Grammar tracker: cannot write to the data folder /x'])
 })
 
-test('the Top mistakes tab shows a worried mascot, the tiles and the share of each type', async ($, on) => {
+test('the Top mistakes tab shows a ✗ icon for a recurring mistake, the tiles and the share of each type', async ($, on) => {
   engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
   expect(await pane.find({ text: '1 mistake you keep repeating.' })).toBeDefined()
+  expect(await pane.find({ text: ' ✗ ' })).toBeDefined()
   expect(await pane.find({ text: /^Watch out for ".*" \(×3\)$/ })).toBeDefined()
   const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text)
   expect(texts).toEqual(
@@ -745,7 +746,7 @@ test('the Top mistakes rows draw an icon and a bar as long as the count', async 
   expect(texts).toContain('░'.repeat(7))
 })
 
-test('the Last prompt tab shows the tiles, the trend of this conversation and a worried mascot for a recurring mistake', async ($, on) => {
+test('the Last prompt tab shows the tiles and the trend of this conversation', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
@@ -772,11 +773,32 @@ test('the Last prompt tab shows the tiles, the trend of this conversation and a 
   expect(await pane.find({ text: ' last 5 prompts' })).toBeDefined()
 })
 
-test('a check with no mistakes shows the clean streak and a happy mascot', async ($, on) => {
+test('a check with no mistakes shows the clean streak', async ($, on) => {
   const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: '2 prompts in a row with no mistakes' })).toBeDefined()
+})
+
+test('the icon flips from ? to ✗ after a check with mistakes lands', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: ' ? ' })).toBeDefined()
+  await calls.clock.advance(500)
+  await pane.redraw()
+  expect(await pane.find({ text: ' ? ' })).toBeUndefined()
+  await calls.clock.advance(180)
+  await pane.redraw()
+  expect(await pane.find({ text: ' ✗ ' })).toBeDefined()
+})
+
+test('the icon flips to ✓ after a check with no mistakes lands', async ($, on) => {
+  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
+  await turn($, calls, [CHECK_TEXT])
+  await calls.clock.advance(680)
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: ' ✓ ' })).toBeDefined()
 })
 
 test('a failed trend query shows a toast and a dash for the streak', async ($, on) => {

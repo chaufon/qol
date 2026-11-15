@@ -18,8 +18,8 @@ import {
   typeColor,
   typeIcon,
 } from './format'
-import { mascotRows } from './mascot'
-import type { Mood } from './mascot'
+import { LAST_STEP, iconRows } from './icon'
+import type { Verdict } from './icon'
 
 type Ui = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 type El = JSX.Element
@@ -99,6 +99,8 @@ export interface PaneProps {
   top: TopMistakes
   trend: number[] | null
   openRow: string | null
+  /** The step of the icon's flip after the last check landed; LAST_STEP shows the verdict. */
+  flipStep: number
 }
 
 export interface PaneActions {
@@ -177,15 +179,20 @@ function tile({ Box, Text }: Ui, id: string, value: string, label: string, color
   )
 }
 
-/** The mascot beside a headline and the line under it. */
-function header({ Box, Text }: Ui, mood: Mood, headline: El, subline: string): El {
+/** The icon beside a headline and the line under it; `step` is the icon's flip, LAST_STEP once it has landed. */
+function header({ Box, Text }: Ui, verdict: Verdict, step: number, headline: El, subline: string): El {
   return (
     <Box gap={2} marginTop={1}>
-      <Box flexDirection="column">
-        {mascotRows(mood).map((row, n) => (
-          <Text key={`mascot-${n}`}>
+      <Box flexDirection="column" flexShrink={0}>
+        {iconRows(verdict, step).map((row, n) => (
+          <Text key={`icon-${n}`} wrap="truncate-end">
             {row.map((run, i) => (
-              <Text key={String(i)} color={run.color} backgroundColor={run.backgroundColor}>
+              <Text
+                key={String(i)}
+                color={run.color}
+                backgroundColor={run.backgroundColor}
+                weight={run.isBold ? 'semibold' : undefined}
+              >
                 {run.text}
               </Text>
             ))}
@@ -200,7 +207,7 @@ function header({ Box, Text }: Ui, mood: Mood, headline: El, subline: string): E
   )
 }
 
-function lastTab(ui: Ui, width: number, check: Mistakes, counts: number[] | null): El {
+function lastTab(ui: Ui, width: number, check: Mistakes, counts: number[] | null, flipStep: number): El {
   const { Box, Text } = ui
   const mistakes = check.occurrences.length
   const recurring = check.occurrences.filter(o => o.isRecurring)
@@ -229,7 +236,7 @@ function lastTab(ui: Ui, width: number, check: Mistakes, counts: number[] | null
         : 'Corrected prompt below'
   return (
     <Box flexDirection="column">
-      {header(ui, recurring.length > 0 ? 'worried' : 'happy', headline, subline)}
+      {header(ui, mistakes > 0 ? 'wrong' : 'right', flipStep, headline, subline)}
       <Box gap={1} marginTop={1}>
         {tile(ui, 'mistakes', String(mistakes), 'Mistakes', mistakes > 0 ? 'error' : 'success', tileWidth)}
         {tile(
@@ -350,7 +357,7 @@ function topTab(ui: Ui, width: number, mistakes: Occurrence[], openRow: string |
   const subline = `${watch ? 'Watch out for' : 'Most frequent:'} "${shown.identifier}" (×${shown.count})`
   return (
     <Box flexDirection="column">
-      {header(ui, recurring > 0 ? 'worried' : 'happy', headline, subline)}
+      {header(ui, recurring > 0 ? 'wrong' : 'right', LAST_STEP, headline, subline)}
       <Box gap={1} marginTop={1}>
         {tile(ui, 'mistakes', String(total), 'Mistakes', 'error', tileWidth)}
         {tile(ui, 'recurring', String(recurring), 'Recurring', recurring > 0 ? 'warning' : 'success', tileWidth)}
@@ -443,7 +450,7 @@ function tabBody(ui: Ui, p: PaneProps, actions: PaneActions): El {
   if (p.isPending) return <Text color={ACCENT}>{CHECKING_PANE}</Text>
   if (p.check === null) return <Text dimColor>No grammar check for the last prompt.</Text>
   if (p.check.doesNotApply) return <Text dimColor>{NOT_APPLY_LINE}</Text>
-  return lastTab(ui, p.width, p.check, p.trend)
+  return lastTab(ui, p.width, p.check, p.trend, p.flipStep)
 }
 
 export function drawPane(ui: Ui, p: PaneProps, actions: PaneActions): El {

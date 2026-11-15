@@ -56,7 +56,7 @@ Claude's reply streams: label + grammar-json block + answer
 | `hooks/python.ts` | Finding Python (`python3`, then `py -3`, then `python`) and running a script |
 | `hooks/draw.tsx` | Drawing the band and the pane from plain props; no state of its own |
 | `hooks/format.ts` | Widths, bars, meters, sparklines, and the icon and color of each mistake type |
-| `hooks/mascot.ts` | The block-character mascot, happy or worried |
+| `hooks/icon.ts` | The pane icon: red E, blue N and a verdict square that flips from ? to a blue ✓ or a red ✗ |
 | `hooks/*.test.ts` | Tests: pure modules tested directly, handlers through `claude-code/testing` |
 | `hooks/hooks.json` | Names the hooks module |
 | `types/index.d.ts` | Types of the mod's state |
