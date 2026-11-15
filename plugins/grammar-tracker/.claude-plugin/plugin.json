@@ -1,6 +1,6 @@
 {
   "name": "grammar-tracker",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Checks the English grammar of each prompt, counts repeated mistakes, and shows the check in a band and a pane",
   "license": "MIT",
   "author": {
@@ -14,6 +14,12 @@
       "title": "Open the pane on a check",
       "description": "Open the Grammar pane by itself when a check with mistakes arrives",
       "default": true
+    },
+    "showTypeRules": {
+      "type": "boolean",
+      "title": "Show the type's rule on every card",
+      "description": "Show what each type of mistake is, with an example, on every mistake card. The r key in the pane shows or hides them all, and each card's button its own",
+      "default": false
     },
     "native_language": {
       "type": "string",

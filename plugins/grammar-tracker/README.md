@@ -12,13 +12,14 @@ language make in English, such as calques and false friends.
 
 - **A check of every prompt, with no extra step.** Claude starts each reply with a grammar check of your prompt. The
   mod hides it from the reply and shows it in a band above the prompt and in a side pane.
-- **Mistakes explained.** Each mistake shows your sentence, the corrected sentence, the reason, and its type (verb
-  tense, preposition, false friend and 15 more), with an example.
+- **Mistakes explained.** Each mistake shows your sentence and the corrected sentence, with the changed words
+  highlighted, the reason, and its type (verb tense, preposition, false friend and 15 more). The type's rule, with an
+  example, is one key or click away.
 - **The corrected prompt**, rewritten in natural English.
 - **Recurring mistakes.** Every mistake has a counter across all your prompts. From the third time, the mod marks it
   as recurring and tells you which one to watch out for.
-- **Progress.** A clean-prompt streak and a trend of your last 10 prompts in this conversation, and a ranking of your
-  top 10 mistakes with the share of each type.
+- **Progress.** A streak of prompts in a row with no mistakes, across every conversation, next to your best streak,
+  and a ranking of your top 10 mistakes with the share of each type.
 - **Dictation-aware.** Filler words, false starts and missing punctuation from voice input are not counted as
   mistakes.
 - **Local and private.** Your history is stored in a SQLite file on your machine. The mod calls no service besides the
@@ -57,8 +58,11 @@ Write prompts as usual.
   `✗ 3 mistakes · ⟳ 1 recurring`, `✓ No mistakes`, or `Grammar check does not apply to the last prompt` (for a prompt
   too short to check or not in English).
 - **The pane** opens by itself, without taking the focus, when a check finds mistakes. Open or close it with the
-  band's `Show`/`Hide` button, or with `ctrl+x tab` then `g`. In the pane, `t` switches tabs and `h` or Esc hides it.
-  - **Last prompt:** one card per mistake, the corrected prompt, the clean streak and the trend.
+  band's `Show`/`Hide` button, or with `ctrl+x tab` then `g`. In the pane, `t` switches tabs, `r` shows or hides the
+  type's rule on every card, and `h` or Esc hides the pane.
+  - **Last prompt:** the mistakes, the recurring ones, your streak and your best streak; then one card per mistake,
+    each with a `Show rule` button on its bottom border, and the corrected prompt. A prompt with no mistakes shows a
+    line about your streak instead.
   - **Top mistakes:** your 10 most frequent mistakes. Click a row to see its latest example.
 - **Skip the check** for one prompt by starting it with `Claude, do not grammar check` (or `don't grammar check`,
   `skip grammar check`, `no grammar check`).
@@ -71,6 +75,7 @@ Set them on the screen the install shows, or later in `/plugin` (manage the plug
 | --- | --- | --- |
 | `native_language` | `Spanish` | Your native language: `Spanish`, `Portuguese`, `French` or `Italian`. The check looks for the mistakes its speakers make |
 | `autoOpenPane` | `true` | Open the pane by itself when a check finds mistakes. With `false`, the band still shows each check and `Show` opens the pane |
+| `showTypeRules` | `false` | Show the type's rule, with an example, on every mistake card. `r` in the pane shows or hides them all for the rest of the conversation |
 
 ## Your data
 

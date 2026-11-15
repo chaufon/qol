@@ -119,17 +119,61 @@ export function shareCells(counts: number[], cells: number): number[] {
   return widths
 }
 
-const SPARK = '▁▂▃▄▅▆▇█'
-
-/** One block per count, as tall as its share of the largest; 0 is the lowest block. */
-export function sparkline(counts: number[]): string[] {
-  const largest = Math.max(1, ...counts)
-  return counts.map(n => SPARK.charAt(n === 0 ? 0 : Math.min(7, Math.max(1, Math.round((n / largest) * 7)))))
+/** A run of a sentence: words that differ from the other sentence of a correction have `isChanged`. */
+export interface Segment {
+  text: string
+  isChanged: boolean
 }
 
-/** The prompts without a mistake at the end of the trend. */
-export function cleanStreak(counts: number[]): number {
-  let streak = 0
-  while (streak < counts.length && counts[counts.length - 1 - streak] === 0) streak++
-  return streak
+/** A word as the comparison sees it: lower case, without punctuation at its ends. */
+function wordKey(word: string): string {
+  return word.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
+}
+
+/** The indexes of the words of `a` and of `b` in their longest common subsequence. */
+function commonWords(a: string[], b: string[]): [Set<number>, Set<number>] {
+  const lengths = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0))
+  const at = (i: number, j: number) => lengths[i]?.[j] ?? 0
+  for (let i = a.length - 1; i >= 0; i--) {
+    const row = lengths[i] ?? []
+    for (let j = b.length - 1; j >= 0; j--)
+      row[j] = a[i] === b[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1))
+  }
+  const inA = new Set<number>()
+  const inB = new Set<number>()
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      inA.add(i++)
+      inB.add(j++)
+    } else if (at(i + 1, j) >= at(i, j + 1)) i++
+    else j++
+  }
+  return [inA, inB]
+}
+
+function segments(sentence: string, kept: Set<number>): Segment[] {
+  const tokens = sentence.match(/\s+|\S+/g) ?? []
+  let word = 0
+  const states = tokens.map(token => (/^\s/.test(token) ? undefined : !kept.has(word++)))
+  const result: Segment[] = []
+  tokens.forEach((text, n) => {
+    // A space is changed only between two changed words, so a highlight never ends in a space.
+    const isChanged = states[n] ?? (states[n - 1] === true && states[n + 1] === true)
+    const previous = result.at(-1)
+    if (previous?.isChanged === isChanged) previous.text += text
+    else result.push({ text, isChanged })
+  })
+  return result
+}
+
+/**
+ * The wrong and the corrected sentence of a mistake, each split into runs, with the words the correction changed
+ * marked. Case and punctuation at the ends of a word do not count as a change.
+ */
+export function wordDiff(wrong: string, corrected: string): { wrong: Segment[]; corrected: Segment[] } {
+  const words = (sentence: string) => (sentence.match(/\S+/g) ?? []).map(wordKey)
+  const [inWrong, inCorrected] = commonWords(words(wrong), words(corrected))
+  return { wrong: segments(wrong, inWrong), corrected: segments(corrected, inCorrected) }
 }

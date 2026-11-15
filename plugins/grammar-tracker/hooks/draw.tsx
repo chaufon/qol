@@ -8,28 +8,33 @@ import {
   barFill,
   capitalize,
   cell,
-  cleanStreak,
   countColumn,
   meter,
   mistakeColumn,
   plural,
   shareCells,
-  sparkline,
   typeColor,
   typeIcon,
+  wordDiff,
 } from './format'
-import { LAST_STEP, iconRows } from './icon'
-import type { Verdict } from './icon'
+import type { Segment } from './format'
 
 type Ui = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 type El = JSX.Element
 type Mistakes = GrammarCheck & { doesNotApply: false }
+type Key = [string, string, string, () => Promise<void>]
 
 const NOT_APPLY_LINE = 'Grammar check does not apply to the last prompt'
-const NO_MISTAKES_LINE = 'No mistakes. Great English, keep it up!'
+const NO_MISTAKES_LINE = '✓ No mistakes.'
 const NO_CHECK_LINE = 'Grammar: no check for the last prompt'
 const CHECKING_LINE = '⠋ Checking…'
 const CHECKING_PANE = '⠋ Checking this prompt…'
+const SHOW_RULE = '▸ Show rule'
+const HIDE_RULE = '▾ Hide rule'
+const SHOW_RULES = 'Show rules'
+const HIDE_RULES = 'Hide rules'
+/** How close to the best streak, in prompts still needed to beat it, the clean line starts counting down. */
+const NEAR_BEST = 3
 
 export interface Chip {
   text: string
@@ -97,34 +102,54 @@ export interface PaneProps {
   check: GrammarCheck | null
   isPending: boolean
   top: TopMistakes
-  trend: number[] | null
   openRow: string | null
-  /** The step of the icon's flip after the last check landed; LAST_STEP shows the verdict. */
-  flipStep: number
+  /** Whether the cards show their type's rule, except the cards whose own button turned it the other way. */
+  isRulesShown: boolean
+  /** The cards of the Last prompt tab whose button turned their rule the other way, by `cardId`. */
+  flippedRules: string[]
 }
 
 export interface PaneActions {
   showTab: (id: PaneTab) => Promise<void>
   hide: () => Promise<void>
   toggleRow: (id: string) => Promise<void>
+  /** Shows or hides the type's rule on every card. */
+  toggleRules: () => Promise<void>
+  /** Shows or hides the type's rule on one card, by `cardId`. */
+  toggleRule: (id: string) => Promise<void>
+}
+
+/** The id of the n-th mistake card of the Last prompt tab. */
+export function cardId(n: number): string {
+  return `o${n}`
+}
+
+/** A pressable label painted over the right end of a card's bottom border. */
+interface BorderButton {
+  key: string
+  label: string
+  onPress: () => Promise<void>
 }
 
 /**
  * A bordered card whose title is painted over its top border, cut with an ellipsis where the border is too short.
- * `right` is painted over the right end of the border, and left out where the border has no room for it.
+ * `right` is painted over the right end of the top border and `button` over the right end of the bottom border; each
+ * is left out where its border has no room for it.
  */
 function card(
-  { Box, Text }: Ui,
+  { Box, Button, Text }: Ui,
   key: string,
   title: string,
   width: number,
   borderColor: string,
   body: El[],
   right?: { text: string; color: string },
+  button?: BorderButton,
 ): El {
   const hasRight = right !== undefined && title.length + right.text.length + 10 <= width
+  const hasButton = button !== undefined && button.label.length + 8 <= width
   return (
-    <Box key={key} flexDirection="column" width={width} marginTop={1}>
+    <Box key={key} flexDirection="column" width={width}>
       <Box flexDirection="column" borderStyle="round" borderColor={borderColor} paddingX={1}>
         {body}
       </Box>
@@ -136,6 +161,13 @@ function card(
           <Text color={right.color}>{` ${right.text} `}</Text>
         </Box>
       ) : null}
+      {hasButton ? (
+        <Box position="absolute" bottom={0} left={width - button.label.length - 4} width={button.label.length + 2}>
+          <Button key={button.key} plain dimColor onPress={button.onPress}>
+            {` ${button.label} `}
+          </Button>
+        </Box>
+      ) : null}
     </Box>
   )
 }
@@ -144,18 +176,37 @@ function fitsBorder(title: string, width: number): boolean {
   return title.length + 2 <= width - 4
 }
 
-function sentences({ Text }: Ui, o: Occurrence): El[] {
+function runs({ Text }: Ui, parts: Segment[], color: string, changedColor: string): El[] {
+  return parts.map((part, n) =>
+    part.isChanged ? (
+      <Text key={String(n)} color="text" backgroundColor={changedColor}>
+        {part.text}
+      </Text>
+    ) : (
+      <Text key={String(n)} color={color}>
+        {part.text}
+      </Text>
+    ),
+  )
+}
+
+/** The wrong and the corrected sentence, with the words the correction changed highlighted, then the reason. */
+function sentences(ui: Ui, o: Occurrence): El[] {
+  const { Text } = ui
+  const diff = wordDiff(o.original, o.corrected)
   return [
-    <Text key="original" color="error">
-      ✗ {o.original}
+    <Text key="original">
+      <Text color="error">✗ </Text>
+      {runs(ui, diff.wrong, 'error', 'diffRemovedWord')}
     </Text>,
-    <Text key="corrected" color="success">
-      ✓ {o.corrected}
+    <Text key="corrected">
+      <Text color="success">✓ </Text>
+      {runs(ui, diff.corrected, 'success', 'diffAddedWord')}
     </Text>,
     ...(o.reason
       ? [
           <Text key="reason" dimColor>
-            {o.reason}
+            ↳ {o.reason}
           </Text>,
         ]
       : []),
@@ -166,7 +217,7 @@ function example(o: Occurrence): string {
   return o.typeExample ? `Example: ${o.typeExample}` : ''
 }
 
-function tile({ Box, Text }: Ui, id: string, value: string, label: string, color: string | undefined, width: number) {
+function stat({ Box, Text }: Ui, id: string, value: string, label: string, color: string | undefined, width: number) {
   return (
     <Box key={id} width={width} borderStyle="round" borderColor="inactive" flexDirection="column" alignItems="center">
       <Text weight="semibold" color={color} dimColor={color === undefined}>
@@ -179,108 +230,88 @@ function tile({ Box, Text }: Ui, id: string, value: string, label: string, color
   )
 }
 
-/** The icon beside a headline and the line under it; `step` is the icon's flip, LAST_STEP once it has landed. */
-function header({ Box, Text }: Ui, verdict: Verdict, step: number, headline: El, subline: string): El {
-  return (
-    <Box gap={2} marginTop={1}>
-      <Box flexDirection="column" flexShrink={0}>
-        {iconRows(verdict, step).map((row, n) => (
-          <Text key={`icon-${n}`} wrap="truncate-end">
-            {row.map((run, i) => (
-              <Text
-                key={String(i)}
-                color={run.color}
-                backgroundColor={run.backgroundColor}
-                weight={run.isBold ? 'semibold' : undefined}
-              >
-                {run.text}
-              </Text>
-            ))}
-          </Text>
-        ))}
-      </Box>
-      <Box flexDirection="column" justifyContent="center" flexShrink={1}>
-        {headline}
-        {subline ? <Text dimColor>{subline}</Text> : null}
-      </Box>
-    </Box>
-  )
+/** The line a clean prompt shows: the streak it extends, measured against the longest one before it. */
+export function cleanLine(streak: number | undefined, bestBefore: number | undefined): string {
+  if (streak === undefined || bestBefore === undefined) return NO_MISTAKES_LINE
+  if (streak <= 1) return `${NO_MISTAKES_LINE} A new streak starts.`
+  if (streak > bestBefore) return `${NO_MISTAKES_LINE} ${streak} in a row: your best streak yet!`
+  if (streak === bestBefore) return `${NO_MISTAKES_LINE} ${streak} in a row: you matched your best streak!`
+  const toBeat = bestBefore - streak + 1
+  if (toBeat <= NEAR_BEST) return `${NO_MISTAKES_LINE} ${streak} in a row, ${toBeat} more to beat your best.`
+  return `${NO_MISTAKES_LINE} ${streak} prompts in a row!`
 }
 
-function lastTab(ui: Ui, width: number, check: Mistakes, counts: number[] | null, flipStep: number): El {
+/** The type's rule of a card under a dashed line: its description and its example. */
+function ruleSection({ Text }: Ui, o: Occurrence, width: number, color: string): El[] {
+  const rule = `${o.typeDescription}${o.typeExample ? ` (${o.typeExample})` : ''}`
+  return [
+    <Text key="divider" color={color} dimColor>
+      {'╌'.repeat(Math.max(0, width - 4))}
+    </Text>,
+    <Text key="rule" dimColor>
+      → {rule}
+    </Text>,
+  ]
+}
+
+function lastTab(ui: Ui, p: PaneProps, check: Mistakes, actions: PaneActions): El {
   const { Box, Text } = ui
   const mistakes = check.occurrences.length
-  const recurring = check.occurrences.filter(o => o.isRecurring)
-  const streak = counts === null ? null : cleanStreak(counts)
-  const tileWidth = Math.floor((width - 2) / 3)
-  const repeating = recurring.length > 0 ? `${recurring.length} you keep repeating` : 'none recurring'
-  const headline =
-    mistakes === 0 ? (
-      <Text weight="semibold" color="success">
-        ✓ {NO_MISTAKES_LINE}
-      </Text>
-    ) : (
-      <Text
-        weight="semibold"
-        color={recurring.length > 0 ? 'warning' : undefined}
-      >{`${plural(mistakes, 'mistake')}, ${repeating}.`}</Text>
-    )
-  const watch = recurring.toSorted((a, b) => b.count - a.count)[0]
-  const subline =
-    mistakes === 0
-      ? streak !== null && streak > 1
-        ? `${streak} prompts in a row with no mistakes`
-        : ''
-      : watch
-        ? `Watch out for "${watch.identifier}" (×${watch.count})`
-        : 'Corrected prompt below'
-  return (
-    <Box flexDirection="column">
-      {header(ui, mistakes > 0 ? 'wrong' : 'right', flipStep, headline, subline)}
-      <Box gap={1} marginTop={1}>
-        {tile(ui, 'mistakes', String(mistakes), 'Mistakes', mistakes > 0 ? 'error' : 'success', tileWidth)}
-        {tile(
-          ui,
-          'recurring',
-          String(recurring.length),
-          'Recurring',
-          recurring.length > 0 ? 'warning' : 'success',
-          tileWidth,
-        )}
-        {tile(
-          ui,
-          'streak',
-          streak === null ? '–' : String(streak),
-          'Clean streak',
-          streak ? 'success' : undefined,
-          tileWidth,
-        )}
+  const recurring = check.occurrences.filter(o => o.isRecurring).length
+  const { streak, bestBefore } = check
+  const best = streak === undefined || bestBefore === undefined ? undefined : Math.max(streak, bestBefore)
+  const isBestReached = streak !== undefined && streak > 0 && streak === best
+  const statWidth = Math.floor((p.width - 3) / 4)
+  const stats = (
+    <Box key="stats" gap={1}>
+      {stat(ui, 'mistakes', String(mistakes), 'Mistakes', mistakes > 0 ? 'error' : 'success', statWidth)}
+      {stat(ui, 'recurring', String(recurring), 'Recurring', recurring > 0 ? 'warning' : 'success', statWidth)}
+      {stat(
+        ui,
+        'streak',
+        streak === undefined ? '–' : String(streak),
+        'Streak',
+        streak ? 'success' : undefined,
+        statWidth,
+      )}
+      {stat(
+        ui,
+        'best',
+        best === undefined ? '–' : String(best),
+        'Best',
+        isBestReached ? 'success' : undefined,
+        statWidth,
+      )}
+    </Box>
+  )
+  if (mistakes === 0) {
+    return (
+      <Box flexDirection="column" gap={1} paddingTop={1}>
+        {stats}
+        <Text key="clean" weight="semibold" color="success">
+          {cleanLine(streak, bestBefore)}
+        </Text>
       </Box>
-      {counts !== null && counts.length > 1 ? (
-        <Box>
-          <Text dimColor>{'Conversation '}</Text>
-          {sparkline(counts).map((bar, n) => (
-            <Text key={String(n)} color={counts[n] === 0 ? 'success' : 'warning'}>
-              {bar}
-            </Text>
-          ))}
-          <Text dimColor>{` last ${counts.length} prompts`}</Text>
-        </Box>
-      ) : null}
+    )
+  }
+  return (
+    <Box flexDirection="column" gap={1} paddingTop={1}>
+      {stats}
       {check.occurrences.map((o, n) => {
+        const id = cardId(n)
+        const isRuleShown = p.isRulesShown !== p.flippedRules.includes(id)
         const title = `${typeIcon(o.type)} ${capitalize(o.typeLabel)} · "${o.identifier}"`
-        const rule = `${o.typeDescription}${o.typeExample ? ` (${o.typeExample})` : ''}`
         const color = o.isRecurring ? 'warning' : 'inactive'
         const right = { text: `${meter(o.count)} ×${o.count}${o.isRecurring ? ' ⟳' : ''}`, color }
-        const body = [
-          ...sentences(ui, o),
-          <Text key="rule" dimColor>
-            {rule}
-          </Text>,
-        ]
-        return card(ui, `o${n}`, title, width, color, body, right)
+        const body = [...sentences(ui, o), ...(isRuleShown ? ruleSection(ui, o, p.width, color) : [])]
+        const button = {
+          key: `rule-${id}`,
+          label: isRuleShown ? HIDE_RULE : SHOW_RULE,
+          onPress: () => actions.toggleRule(id),
+        }
+        return card(ui, id, title, p.width, color, body, right, button)
       })}
-      {card(ui, 'corrected', '✎ Corrected prompt', width, 'suggestion', [
+      {card(ui, 'corrected', '✎ Corrected prompt', p.width, 'suggestion', [
         <Text key="text">{check.correctedPrompt}</Text>,
       ])}
     </Box>
@@ -342,26 +373,26 @@ function topTab(ui: Ui, width: number, mistakes: Occurrence[], openRow: string |
   const columns = { mistake: mistakeColumn(width, largest), count: countColumn(largest), largest }
   const cardWidth = width - 2
   const total = mistakes.reduce((sum, o) => sum + o.count, 0)
-  const tileWidth = Math.floor((width - 2) / 3)
+  const statWidth = Math.floor((width - 2) / 3)
   const types = typeShares(mistakes)
   const cells = shareCells(
     types.map(([, n]) => n),
     width - 2,
   )
   const shown = watch ?? mostFrequent
-  const headline = (
-    <Text weight="semibold" color={recurring > 0 ? 'warning' : 'success'}>
-      {recurring > 0 ? `${plural(recurring, 'mistake')} you keep repeating.` : 'No mistake you keep repeating.'}
-    </Text>
-  )
   const subline = `${watch ? 'Watch out for' : 'Most frequent:'} "${shown.identifier}" (×${shown.count})`
   return (
     <Box flexDirection="column">
-      {header(ui, recurring > 0 ? 'wrong' : 'right', LAST_STEP, headline, subline)}
+      <Box flexDirection="column" marginTop={1}>
+        <Text weight="semibold" color={recurring > 0 ? 'warning' : 'success'}>
+          {recurring > 0 ? `${plural(recurring, 'mistake')} you keep repeating.` : 'No mistake you keep repeating.'}
+        </Text>
+        <Text dimColor>{subline}</Text>
+      </Box>
       <Box gap={1} marginTop={1}>
-        {tile(ui, 'mistakes', String(total), 'Mistakes', 'error', tileWidth)}
-        {tile(ui, 'recurring', String(recurring), 'Recurring', recurring > 0 ? 'warning' : 'success', tileWidth)}
-        {tile(ui, 'types', String(types.length), 'Types', undefined, tileWidth)}
+        {stat(ui, 'mistakes', String(total), 'Mistakes', 'error', statWidth)}
+        {stat(ui, 'recurring', String(recurring), 'Recurring', recurring > 0 ? 'warning' : 'success', statWidth)}
+        {stat(ui, 'types', String(types.length), 'Types', undefined, statWidth)}
       </Box>
       <Box marginTop={1}>
         <Text dimColor>{`Where your mistakes go (top ${mistakes.length})`}</Text>
@@ -398,7 +429,7 @@ function topTab(ui: Ui, width: number, mistakes: Occurrence[], openRow: string |
         return (
           <Box key={`mistake-${n}`} flexDirection="column">
             {row}
-            <Box marginLeft={2} marginBottom={1}>
+            <Box marginLeft={2} marginTop={1} marginBottom={1}>
               {card(ui, 'example', o.typeDescription, cardWidth, o.isRecurring ? 'warning' : 'inactive', body)}
             </Box>
           </Box>
@@ -410,12 +441,13 @@ function topTab(ui: Ui, width: number, mistakes: Occurrence[], openRow: string |
 
 /**
  * The keys, on the last row the pane shows, under a line: the pane has no footer of its own, so the two rows move with
- * the scroll.
+ * the scroll. The Last prompt tab adds the key that shows or hides the type's rule on every card.
  */
 function footer({ Box, Button, Text }: Ui, p: PaneProps, actions: PaneActions): El {
-  const keys: [string, string, string, () => Promise<void>][] = [
+  const keys: Key[] = [
     ['tab-next', 't', 'Tab', () => actions.showTab(p.tab === 'last' ? 'top' : 'last')],
     ['hide', 'h', 'Hide', actions.hide],
+    ...(p.tab === 'last' ? [['rules', 'r', p.isRulesShown ? HIDE_RULES : SHOW_RULES, actions.toggleRules] as Key] : []),
   ]
   const used = keys.reduce((n, [, hotkey, label]) => n + hotkey.length + label.length + 4, 0)
   return (
@@ -450,7 +482,7 @@ function tabBody(ui: Ui, p: PaneProps, actions: PaneActions): El {
   if (p.isPending) return <Text color={ACCENT}>{CHECKING_PANE}</Text>
   if (p.check === null) return <Text dimColor>No grammar check for the last prompt.</Text>
   if (p.check.doesNotApply) return <Text dimColor>{NOT_APPLY_LINE}</Text>
-  return lastTab(ui, p.width, p.check, p.trend, p.flipStep)
+  return lastTab(ui, p, p.check, actions)
 }
 
 export function drawPane(ui: Ui, p: PaneProps, actions: PaneActions): El {

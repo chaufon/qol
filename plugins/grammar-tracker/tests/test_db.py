@@ -4,10 +4,12 @@ import pytest
 from lib.db import (
     VERSION,
     NewerDatabaseError,
+    Streak,
     active_types,
     all_types,
     connect,
     save_check,
+    streak_of,
     top_mistakes,
 )
 from lib.mistake_types import ADDED_IN_2, ADDED_IN_6, ROMANCE_TEXTS_5, SPANISH_TEXTS_4, WORD_CHOICE_1
@@ -476,3 +478,52 @@ def test_migration_from_5_keeps_an_edited_type(tmp_path):
     types = {t.key: t for t in all_types(connect(tmp_path / "g.db"))}
     assert types["agreement"].description == "mine"
     assert types["malformed_tense"].description.startswith("The right tense built wrong: auxiliaries wrong,")
+
+
+def save_at(conn, turn, created_at, *mistakes):
+    return save_check(
+        conn,
+        turn_id=turn,
+        session_id=f"s-{turn}",
+        created_at=created_at,
+        project_dir="/p",
+        original="original",
+        check=check(*mistakes),
+    )
+
+
+def streaks(conn):
+    return [row[0] for row in conn.execute("SELECT clean_streak FROM prompts ORDER BY created_at, id")]
+
+
+def test_clean_streak_counts_clean_prompts_in_a_row_across_conversations(tmp_path):
+    conn = connect(tmp_path / "g.db")
+    for n, mistakes in enumerate([[], [], [m("article", "the")], [], [], []]):
+        save_at(conn, f"t{n}", f"2026-10-17T12:00:0{n}Z", *mistakes)
+    assert streaks(conn) == [1, 2, 0, 1, 2, 3]
+    assert streak_of(conn, "t5") == Streak(current=3, best_before=2)
+    assert streak_of(conn, "t1") == Streak(current=2, best_before=1)
+    assert streak_of(conn, "unknown") is None
+
+
+def test_a_check_saved_late_fixes_the_streaks_of_the_prompts_sent_after_it(tmp_path):
+    conn = connect(tmp_path / "g.db")
+    save_at(conn, "first", "2026-10-17T12:00:00Z")
+    save_at(conn, "third", "2026-10-17T12:00:02Z")
+    assert streaks(conn) == [1, 2]
+    save_at(conn, "second", "2026-10-17T12:00:01Z", m("article", "the"))
+    assert streaks(conn) == [1, 0, 1]
+
+
+def test_migration_from_6_counts_the_streak_of_every_saved_prompt(tmp_path):
+    path = tmp_path / "g.db"
+    conn = connect(path)
+    for n, mistakes in enumerate([[], [m("article", "the")], [], []]):
+        save_at(conn, f"t{n}", f"2026-10-17T12:00:0{n}Z", *mistakes)
+    conn.execute("ALTER TABLE prompts DROP COLUMN clean_streak")
+    conn.execute("PRAGMA user_version = 6")
+    conn.commit()
+    conn.close()
+    conn = connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == VERSION
+    assert streaks(conn) == [1, 0, 1, 2]

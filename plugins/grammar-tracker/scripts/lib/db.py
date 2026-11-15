@@ -7,7 +7,8 @@ from lib.mistake_types import ADDED_IN_2, ADDED_IN_6, ROMANCE_TEXTS_5, SEED, SPA
 from lib.transcript import Check
 
 # turn_id is the engine's key for the turn and the dedupe key. prompt_uuid is the prompt's uuid in the transcript,
-# empty until `query.py rekey` finds it.
+# empty until `query.py rekey` finds it. clean_streak is the number of prompts in a row with no mistakes, across every
+# conversation, that ends at this prompt: 0 for a prompt with mistakes.
 PROMPTS_DDL = """CREATE TABLE {name} (
     id INTEGER PRIMARY KEY,
     turn_id TEXT UNIQUE,
@@ -17,7 +18,8 @@ PROMPTS_DDL = """CREATE TABLE {name} (
     project_dir TEXT,
     input_mode TEXT CHECK (input_mode IN ('typed', 'dictated')),
     original TEXT NOT NULL,
-    corrected TEXT NOT NULL
+    corrected TEXT NOT NULL,
+    clean_streak INTEGER NOT NULL DEFAULT 0
 )"""
 SCHEMA = (
     PROMPTS_DDL.format(name="IF NOT EXISTS prompts"),
@@ -47,7 +49,7 @@ MISTAKES_DDL = """CREATE TABLE {name} (
     UNIQUE (type, identifier)
 )"""
 
-VERSION = 6
+VERSION = 7
 
 
 class NewerDatabaseError(Exception):
@@ -123,6 +125,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _remove_spanish(conn)
         if version <= 5:
             _cover_romance(conn)
+        if version <= 6:
+            _add_clean_streak(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchall():
             raise sqlite3.IntegrityError("foreign key check failed after migration")
         conn.execute(f"PRAGMA user_version = {VERSION}")
@@ -231,6 +235,54 @@ def _add_turn_id(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE prompts_new RENAME TO prompts")
 
 
+def _add_clean_streak(conn: sqlite3.Connection) -> None:
+    """Add the clean_streak column of version 7 to prompts and count it for every saved prompt."""
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(prompts)")]
+    if "clean_streak" not in columns:
+        conn.execute("ALTER TABLE prompts ADD COLUMN clean_streak INTEGER NOT NULL DEFAULT 0")
+    _count_streaks(conn, "")
+
+
+def _count_streaks(conn: sqlite3.Connection, since: str) -> None:
+    """Count clean_streak again for the prompts sent at `since` or later, in the order they were sent, from the streak
+    of the prompt sent before them. A prompt whose check is saved after a later prompt's thus fixes the ones after it."""
+    row = conn.execute(
+        "SELECT clean_streak FROM prompts WHERE created_at < ? ORDER BY created_at DESC, id DESC LIMIT 1", (since,)
+    ).fetchone()
+    streak = row[0] if row else 0
+    prompts = conn.execute(
+        "SELECT p.id, EXISTS (SELECT 1 FROM occurrences o WHERE o.prompt_id = p.id) FROM prompts p"
+        " WHERE p.created_at >= ? ORDER BY p.created_at, p.id",
+        (since,),
+    ).fetchall()
+    updates = []
+    for prompt_id, has_mistakes in prompts:
+        streak = 0 if has_mistakes else streak + 1
+        updates.append((streak, prompt_id))
+    conn.executemany("UPDATE prompts SET clean_streak = ? WHERE id = ?", updates)
+
+
+@dataclass
+class Streak:
+    """The clean streak that ends at a prompt, and the longest one of the prompts sent before it."""
+
+    current: int
+    best_before: int
+
+
+def streak_of(conn: sqlite3.Connection, turn_id: str) -> Streak | None:
+    """Return the clean streak of the prompt saved for `turn_id`, or None when no prompt has that turn id."""
+    row = conn.execute("SELECT clean_streak, created_at, id FROM prompts WHERE turn_id = ?", (turn_id,)).fetchone()
+    if row is None:
+        return None
+    current, created_at, prompt_id = row
+    (best_before,) = conn.execute(
+        "SELECT COALESCE(MAX(clean_streak), 0) FROM prompts WHERE created_at < ? OR (created_at = ? AND id < ?)",
+        (created_at, created_at, prompt_id),
+    ).fetchone()
+    return Streak(current, best_before)
+
+
 def _types(conn: sqlite3.Connection, where: str = "") -> list[MistakeType]:
     rows = conn.execute(
         f"SELECT key, label, description, example, identifier_rule, position, deleted_at"
@@ -296,6 +348,7 @@ def save_check(
                 (prompt_id, mistake_id, mistake.original, mistake.corrected, mistake.reason),
             )
             mistake_ids.append(mistake_id)
+        _count_streaks(conn, created_at)
     saved = []
     for m, type_, mid in zip(check.mistakes, types, mistake_ids, strict=True):
         key, label, description, example = conn.execute(
@@ -321,13 +374,3 @@ def top_mistakes(conn: sqlite3.Connection, limit: int) -> list[SavedOccurrence]:
         (limit,),
     ).fetchall()
     return [SavedOccurrence(*row) for row in rows]
-
-
-def session_trend(conn: sqlite3.Connection, session_id: str, limit: int) -> list[int]:
-    """Return the mistake count of each of the last `limit` prompts of a conversation, oldest first."""
-    rows = conn.execute(
-        "SELECT COUNT(o.id) FROM prompts p LEFT JOIN occurrences o ON o.prompt_id = p.id"
-        " WHERE p.session_id = ? GROUP BY p.id ORDER BY p.id DESC LIMIT ?",
-        (session_id, limit),
-    ).fetchall()
-    return [n for (n,) in reversed(rows)]

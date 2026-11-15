@@ -3,10 +3,12 @@
 The mod (hooks/register.tsx) runs this as soon as the check block closes in the streamed reply, with the JSON
 `{turn_id, session_id, cwd, prompt, reply, timestamp}` on standard input: the engine's turn id, the prompt the user
 sent, the reply streamed so far and the time the prompt was sent. It prints `corrected_prompt` and `occurrences` (each
-saved mistake with its reason, its counter and its type's label, description and example), which the mod draws in its
-band and pane. When the reply says the check does not apply, it prints `does_not_apply` alone. Before it saves, it
-stores the transcript uuid of earlier prompts that have none (lib/rekey.py). Never blocks Claude Code: failures go to
-the error log and print `systemMessage`, a one-line warning that the mod shows as a toast."""
+saved mistake with its reason, its counter and its type's label, description and example), `clean_streak` (the
+prompts in a row with no mistakes that end at this one, across every conversation) and `best_before` (the longest
+clean streak before this prompt), which the mod draws in its band and pane. When the reply says the check does not
+apply, it prints `does_not_apply` alone. Before it saves, it stores the transcript uuid of earlier prompts that have
+none (lib/rekey.py). Never blocks Claude Code: failures go to the error log and print `systemMessage`, a one-line
+warning that the mod shows as a toast."""
 
 import json
 import sys
@@ -14,7 +16,7 @@ import traceback
 from typing import Any
 
 from lib import config
-from lib.db import connect, save_check
+from lib.db import connect, save_check, streak_of
 from lib.errorlog import UNWRITABLE, log_error
 from lib.rekey import rekey
 from lib.report import occurrence_fields
@@ -40,13 +42,16 @@ def report(data: dict[str, Any]) -> dict[str, object] | None:
             original=data["prompt"],
             check=check,
         )
+        streak = streak_of(conn, data["turn_id"]) if saved is not None else None
     finally:
         conn.close()
-    if saved is None:
+    if saved is None or streak is None:
         return None
     return {
         "corrected_prompt": check.corrected_prompt,
         "occurrences": occurrence_fields(saved, config.RECURRING_THRESHOLD),
+        "clean_streak": streak.current,
+        "best_before": streak.best_before,
     }
 
 

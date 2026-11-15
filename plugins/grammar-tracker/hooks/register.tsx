@@ -1,16 +1,14 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { GrammarCheck, PaneTab, TopMistakes } from '../types'
 import { checkState, stripCheck, toCheck, toOccurrence } from './check'
 import type { ContextOutput, OccurrenceFields, SaveOutput } from './check'
 import { drawBand, drawPane } from './draw'
 import type { PaneActions } from './draw'
-import { FLIP_MS, LAST_STEP } from './icon'
 import { runScript } from './python'
 
 const PANE = 'grammar'
-const TREND_PROMPTS = 10
 
 const last = atom({ plugin: 'grammar-tracker', key: 'last' } as const, null)
 const isOpen = atom({ plugin: 'grammar-tracker', key: 'isOpen' } as const, false)
@@ -18,9 +16,9 @@ const tab = atom({ plugin: 'grammar-tracker', key: 'tab' } as const, 'last')
 const top = atom({ plugin: 'grammar-tracker', key: 'top' } as const, null as TopMistakes)
 const openRow = atom({ plugin: 'grammar-tracker', key: 'openRow' } as const, null as string | null)
 const pending = atom({ plugin: 'grammar-tracker', key: 'pending' } as const, false)
-const trend = atom({ plugin: 'grammar-tracker', key: 'trend' } as const, null as number[] | null)
 const manualHide = atom({ plugin: 'grammar-tracker', key: 'manualHide' } as const, false)
-const flipStep = atom({ plugin: 'grammar-tracker', key: 'flipStep' } as const, LAST_STEP as number)
+const rulesShown = atom({ plugin: 'grammar-tracker', key: 'rulesShown' } as const, null as boolean | null)
+const flippedRules = atom({ plugin: 'grammar-tracker', key: 'flippedRules' } as const, [] as string[])
 
 /**
  * The prompt of the turn in progress and what its reply has settled. 'waiting': the reply may still hold a check.
@@ -39,12 +37,12 @@ let turn: Turn | undefined
 let submitted: { text: string; timestamp: string } | undefined
 /** The autoOpenPane option: false keeps the pane closed until the user opens it. */
 let isAutoOpenOn = true
+/** The showTypeRules option: true shows the type's rule on every card until the footer key turns them off. */
+let isRulesShownByDefault = false
 /** The native_language option, passed to scripts/prompt_context.py, which checks it and names it in the instruction. */
 let nativeLanguage: string | undefined
 /** The load of the top mistakes in flight, so a pane drawn again while query.py runs does not start another. */
 let loadingTop: Promise<void> | undefined
-/** The timers of the icon's flip in progress, cancelled when another check lands before it ends. */
-let flipTimers: Timer[] = []
 
 function parseJson<T>(stdout: string, empty: T): T {
   return stdout.trim() ? (JSON.parse(stdout) as T) : empty
@@ -58,17 +56,6 @@ async function refreshTop($: EngineInterface): Promise<void> {
     const message = `Grammar tracker: failed to read the top mistakes (${String(error)})`
     await update($, top, () => ({ error: message }))
     $.ui.toast(message)
-  }
-}
-
-async function refreshTrend($: EngineInterface): Promise<void> {
-  try {
-    const args = ['trend', await $.session.id(), String(TREND_PROMPTS)]
-    const counts = JSON.parse(await runScript($, 'query.py', args)) as number[]
-    await update($, trend, () => counts)
-  } catch (error) {
-    await update($, trend, () => null)
-    $.ui.toast(`Grammar tracker: failed to read the trend (${String(error)})`)
   }
 }
 
@@ -97,8 +84,7 @@ async function openPane($: EngineInterface, isAutomatic = false): Promise<void> 
   if (!isAutomatic) await update($, manualHide, () => false)
   await update($, isOpen, () => true)
   await $.ui.open({ id: PANE, title: '✎ Grammar', ...(isAutomatic ? {} : { focus: true }), closeOnEscape: true })
-  // A check that opens the pane has just refreshed the trend.
-  await Promise.all([loadTop($), ...(isAutomatic ? [] : [refreshTrend($)])])
+  await loadTop($)
 }
 
 async function closePane($: EngineInterface): Promise<void> {
@@ -113,18 +99,9 @@ async function openPaneForCheck($: EngineInterface): Promise<void> {
   await openPane($, true)
 }
 
-/** Flips the icon's verdict square from "?" to the verdict, one step for each FLIP_MS entry. */
-async function flipIcon($: EngineInterface): Promise<void> {
-  for (const timer of flipTimers) timer.cancel()
-  await update($, flipStep, () => 0)
-  let due = 0
-  flipTimers = FLIP_MS.map((ms, n) => {
-    due += ms
-    return $.clock.after(due, () => void update($, flipStep, () => n + 1))
-  })
-}
-
+/** Shows a check in the band and the pane, with every card's rule back to the way the footer key set it. */
 async function settle($: EngineInterface, check: GrammarCheck | null): Promise<void> {
+  await update($, flippedRules, () => [])
   await update($, last, () => check)
   await update($, pending, () => false)
 }
@@ -157,8 +134,6 @@ async function saveCheck($: EngineInterface, current: Turn, reply: string): Prom
     const check = toCheck(output)
     if (check) {
       await settle($, check)
-      if (!check.doesNotApply) await flipIcon($)
-      if (!check.doesNotApply) await refreshTrend($)
       if (!check.doesNotApply && check.occurrences.length > 0) await openPaneForCheck($)
     } else {
       await update($, pending, () => false)
@@ -173,18 +148,26 @@ async function saveCheck($: EngineInterface, current: Turn, reply: string): Prom
   }
 }
 
-function paneActions($: EngineInterface, row: string | null): PaneActions {
+function paneActions($: EngineInterface, row: string | null, isRulesShown: boolean): PaneActions {
   return {
     showTab: id => showTab($, id),
     hide: () => closePane($),
     toggleRow: async id => {
       await update($, openRow, () => (row === id ? null : id))
     },
+    toggleRules: async () => {
+      await update($, flippedRules, () => [])
+      await update($, rulesShown, () => !isRulesShown)
+    },
+    toggleRule: async id => {
+      await update($, flippedRules, ids => (ids.includes(id) ? ids.filter(other => other !== id) : [...ids, id]))
+    },
   }
 }
 
 export const register: Register = (on, options) => {
   isAutoOpenOn = options.autoOpenPane !== false
+  isRulesShownByDefault = options.showTypeRules === true
   nativeLanguage = typeof options.native_language === 'string' ? options.native_language : undefined
 
   on('ui.close', async ($, e, next) => {
@@ -272,6 +255,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const row = await read($, openRow)
+    const isRulesShown = (await read($, rulesShown)) ?? isRulesShownByDefault
     const props = {
       width: e.props.bodyColumns,
       scroll: e.props.scroll,
@@ -279,10 +263,10 @@ export const register: Register = (on, options) => {
       check: await read($, last),
       isPending: await read($, pending),
       top: await read($, top),
-      trend: await read($, trend),
       openRow: row,
-      flipStep: await read($, flipStep),
+      isRulesShown,
+      flippedRules: await read($, flippedRules),
     }
-    return drawPane($.ui.resolve(e), props, paneActions($, row))
+    return drawPane($.ui.resolve(e), props, paneActions($, row, isRulesShown))
   })
 }

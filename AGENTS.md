@@ -9,6 +9,8 @@ A Claude Code plugin marketplace: four mods in `plugins/<name>/`, listed in `.cl
   `next(e)`, so mods stack in any load order.
 - **End users install nothing.** At runtime a mod uses what Claude Code provides, plus the Python standard library for
   grammar-tracker's scripts (Python 3.10+). Development tools live at the root, in `package.json` and `pyproject.toml`.
+- **The look follows `DESIGN.md`**: shared colors, spacing, components and copy. `docs/UI-REFERENCE.md` sums up
+  what the mod API offers for drawing.
 - **Words follow `GLOSSARY.md`.** For example, "conversation" and "5-hour window", never "session".
 - **A release raises `version`** in `plugins/<name>/.claude-plugin/plugin.json`: minor for a feature, patch for a
   fix. Claude Code offers an update only when that field changes.

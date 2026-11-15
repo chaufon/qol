@@ -1,17 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import {
-  barFill,
-  cell,
-  cleanStreak,
-  countColumn,
-  meter,
-  mistakeColumn,
-  shareCells,
-  sparkline,
-  typeColor,
-  typeIcon,
-} from './format'
+import { barFill, cell, countColumn, meter, mistakeColumn, shareCells, typeColor, typeIcon, wordDiff } from './format'
 
 test('cell cuts or pads a table cell and the Count column fits the largest count', () => {
   expect(cell('article', 4)).toBe('art…')
@@ -28,7 +17,7 @@ test('a Top mistakes row with the largest count fits the pane', () => {
   }
 })
 
-test('meter, barFill, sparkline and cleanStreak scale a count', () => {
+test('meter and barFill scale a count', () => {
   expect([1, 2, 3, 4, 5, 9, 10, 59].map(meter)).toEqual([
     '●○○○○',
     '●●○○○',
@@ -40,9 +29,6 @@ test('meter, barFill, sparkline and cleanStreak scale a count', () => {
     '●●●●●',
   ])
   expect([barFill(59, 59), barFill(1, 59), barFill(30, 59)]).toEqual([10, 1, 5])
-  expect(sparkline([0, 1, 4, 8])).toEqual(['▁', '▂', '▅', '█'])
-  expect(sparkline([0, 0])).toEqual(['▁', '▁'])
-  expect([cleanStreak([1, 0, 0]), cleanStreak([0, 2]), cleanStreak([]), cleanStreak([0, 0])]).toEqual([2, 0, 0, 2])
 })
 
 test('every mistake type has an icon and a color, and an unknown type uses the "other" ones', () => {
@@ -59,4 +45,24 @@ test('shareCells splits a bar by share, one cell at least, and fills the bar', (
   expect(shareCells([100, 1, 1], 10)).toEqual([8, 1, 1])
   expect(shareCells([1, 1, 1], 2)).toEqual([1, 1])
   expect(shareCells([], 10)).toEqual([])
+})
+
+/** A diffed sentence written with the changed runs in brackets. */
+const marked = (parts: { text: string; isChanged: boolean }[]) =>
+  parts.map(part => (part.isChanged ? `[${part.text}]` : part.text)).join('')
+
+test('wordDiff marks the words a correction changed, and not case or punctuation at their ends', () => {
+  const diff = wordDiff(
+    'update the marketplace qol and all their pluggins',
+    'Update the qol marketplace and all its plugins.',
+  )
+  expect(marked(diff.wrong)).toBe('update the [marketplace] qol and all [their pluggins]')
+  expect(marked(diff.corrected)).toBe('Update the qol [marketplace] and all [its plugins.]')
+})
+
+test('wordDiff keeps spaces out of the edges of a highlight', () => {
+  expect(marked(wordDiff('commit changes into main', 'commit the changes to main').corrected)).toBe(
+    'commit [the] changes [to] main',
+  )
+  expect(marked(wordDiff('same words', 'same words').wrong)).toBe('same words')
 })

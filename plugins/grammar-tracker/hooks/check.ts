@@ -34,6 +34,8 @@ export interface SaveOutput {
   does_not_apply?: true
   corrected_prompt?: string
   occurrences?: OccurrenceFields[]
+  clean_streak?: number
+  best_before?: number
 }
 
 function afterLabel(start: string): string {
@@ -95,5 +97,7 @@ export function toCheck(output: SaveOutput): GrammarCheck | null {
     doesNotApply: false,
     correctedPrompt: output.corrected_prompt ?? '',
     occurrences: output.occurrences.map(toOccurrence),
+    ...(output.clean_streak === undefined ? {} : { streak: output.clean_streak }),
+    ...(output.best_before === undefined ? {} : { bestBefore: output.best_before }),
   }
 }

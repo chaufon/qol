@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { toCheck } from './check'
-import { bandChips } from './draw'
+import { bandChips, cleanLine } from './draw'
 
 const SAVE_OUTPUT = {
   corrected_prompt: 'What files does the mod folder have?',
@@ -33,6 +33,8 @@ const SAVE_OUTPUT = {
       type_example: null,
     },
   ],
+  clean_streak: 0,
+  best_before: 5,
 }
 
 const TURN = { answer: 'reply', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
@@ -69,8 +71,6 @@ function engine(on: On, stdout: string) {
     stderr: '',
     exitCode: 0,
     top: JSON.stringify(SAVE_OUTPUT.occurrences),
-    trend: '[1,0,2,0,0]',
-    isTrendBroken: false,
     isTopBroken: false,
     runs: [] as (readonly string[])[],
     opened: [] as string[],
@@ -108,12 +108,6 @@ function engine(on: On, stdout: string) {
     calls.runs.push(e.argv)
     calls.inits.push(e.init)
     if (e.argv[2] === 'top' && calls.isTopBroken) throw new Error('timed out')
-    if (e.argv[2] === 'trend' && calls.isTrendBroken) throw new Error('timed out')
-    if (e.argv[2] === 'trend') {
-      return {
-        value: { exitCode: 0, stdout: calls.trend, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-      }
-    }
     if (e.argv[2] === 'top') {
       return {
         value: { exitCode: 0, stdout: calls.top, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
@@ -438,7 +432,7 @@ test('a check block that is not at the start of the reply is not saved', async (
 test('the scripts run without a data folder from the mod', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
-  expect(calls.runs.map(argv => argv[2])).toEqual([undefined, 'trend', 'top', 'top'])
+  expect(calls.runs.map(argv => argv[2])).toEqual([undefined, 'top', 'top'])
   expect(calls.inits.every(init => (init as { env?: unknown } | undefined)?.env === undefined)).toBe(true)
 })
 
@@ -494,7 +488,11 @@ const PANE = {
   props: PANE_PROPS,
 } as const
 
-test('the Last prompt tab draws a card per mistake with its title, sentences, reason and rule', async ($, on) => {
+const RULE_OF_ARTICLE =
+  '→ A wrong, missing or extra "a/an" or "the". ("the people are selfish" instead of "people are selfish")'
+const RULE_OF_TENSE = '→ The right tense built wrong: auxiliaries missing, extra or in the wrong place.'
+
+test('the Last prompt tab draws a card per mistake with its title, counter, sentences and reason', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
@@ -504,16 +502,77 @@ test('the Last prompt tab draws a card per mistake with its title, sentences, re
   expect(await pane.find({ text: ' ●●●○○ ×3 ⟳ ' })).toBeDefined()
   expect(await pane.find({ text: '✗ c' })).toBeDefined()
   expect(await pane.find({ text: '✓ d' })).toBeDefined()
-  expect(await pane.find({ text: 'a known remote takes the' })).toBeDefined()
-  expect(
-    await pane.find({
-      text: 'A wrong, missing or extra "a/an" or "the". ("the people are selfish" instead of "people are selfish")',
-    }),
-  ).toBeDefined()
-  expect(
-    await pane.find({ text: 'The right tense built wrong: auxiliaries missing, extra or in the wrong place.' }),
-  ).toBeDefined()
+  expect(await pane.find({ text: '↳ a known remote takes the' })).toBeDefined()
   expect(await pane.find({ text: ' ✎ Corrected prompt ' })).toBeDefined()
+})
+
+test('the words a correction changed are highlighted in both sentences', async ($, on) => {
+  const [first] = SAVE_OUTPUT.occurrences
+  const occurrence = { ...first, original: 'commit changes into main', corrected: 'commit the changes to main' }
+  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [occurrence] }))
+  await turn($, calls, [CHECK_TEXT])
+  const pane = await $.ui.mount(PANE)
+  const marked = async (color: string) =>
+    (await pane.findAll({ type: 'Text' })).filter(t => t.props.backgroundColor === color).map(t => t.text)
+  expect(await marked('diffRemovedWord')).toEqual(['into'])
+  expect(await marked('diffAddedWord')).toEqual(['the', 'to'])
+})
+
+test("the type's rule is hidden, and a card's button shows and hides its own", async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: RULE_OF_ARTICLE })).toBeUndefined()
+  expect(await pane.find({ text: ' ▸ Show rule ' })).toBeDefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'rule-o0' })
+  await pane.redraw()
+  expect(await pane.find({ text: RULE_OF_ARTICLE })).toBeDefined()
+  expect(await pane.find({ text: RULE_OF_TENSE })).toBeUndefined()
+  expect(await pane.find({ text: ' ▾ Hide rule ' })).toBeDefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'rule-o0' })
+  await pane.redraw()
+  expect(await pane.find({ text: RULE_OF_ARTICLE })).toBeUndefined()
+})
+
+test("the footer key r shows and hides the type's rule on every card", async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: 'Show rules' })).toBeDefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'rules' })
+  await pane.redraw()
+  expect(await pane.find({ text: RULE_OF_ARTICLE })).toBeDefined()
+  expect(await pane.find({ text: RULE_OF_TENSE })).toBeDefined()
+  expect(await pane.find({ text: 'Hide rules' })).toBeDefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'rule-o1' })
+  await pane.redraw()
+  expect(await pane.find({ text: RULE_OF_TENSE })).toBeUndefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'rules' })
+  await pane.redraw()
+  expect(await pane.find({ text: RULE_OF_ARTICLE })).toBeUndefined()
+  expect(await pane.find({ text: RULE_OF_TENSE })).toBeUndefined()
+})
+
+test(
+  "the showTypeRules option shows the type's rule on every card from the start",
+  { options: { showTypeRules: true } },
+  async ($, on) => {
+    const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+    await turn($, calls, [CHECK_TEXT])
+    const pane = await $.ui.mount(PANE)
+    expect(await pane.find({ text: RULE_OF_ARTICLE })).toBeDefined()
+    expect(await pane.find({ text: 'Hide rules' })).toBeDefined()
+  },
+)
+
+test('a new check closes the rules its cards opened before', async ($, on) => {
+  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
+  await turn($, calls, [CHECK_TEXT])
+  const pane = await $.ui.mount(PANE)
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'rule-o0' })
+  await turn($, calls, [CHECK_TEXT], 't2')
+  await pane.redraw()
+  expect(await pane.find({ text: RULE_OF_ARTICLE })).toBeUndefined()
 })
 
 test('the Last prompt tab leaves out the parentheses for an empty example', async ($, on) => {
@@ -521,20 +580,30 @@ test('the Last prompt tab leaves out the parentheses for an empty example', asyn
   const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [{ ...first, type_example: '' }] }))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ text: 'A wrong, missing or extra "a/an" or "the".' })).toBeDefined()
+  await $.ui.press({ plugin: 'grammar-tracker', key: 'rule-o0' })
+  await pane.redraw()
+  expect(await pane.find({ text: '→ A wrong, missing or extra "a/an" or "the".' })).toBeDefined()
 })
 
-test('the Last prompt tab praises a check with no mistakes and shows the corrected prompt', async ($, on) => {
-  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
+test('the Last prompt tab cheers a check with no mistakes by its streak, with no corrected prompt', async ($, on) => {
+  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [], clean_streak: 3, best_before: 5 }))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
-  const praise = (await pane.findAll({ type: 'Text' })).find(
-    t => t.text === '✓ No mistakes. Great English, keep it up!',
+  const line = (await pane.findAll({ type: 'Text' })).find(
+    t => t.text === '✓ No mistakes. 3 in a row, 3 more to beat your best.',
   )
-  expect(praise?.props.color).toBe('success')
-  expect(praise?.props.weight).toBe('semibold')
-  expect(praise?.props.dimColor).toBeFalsy()
-  expect(await pane.find({ text: ' ✎ Corrected prompt ' })).toBeDefined()
+  expect(line?.props.color).toBe('success')
+  expect(line?.props.weight).toBe('semibold')
+  expect(await pane.find({ text: ' ✎ Corrected prompt ' })).toBeUndefined()
+})
+
+test('the clean line follows the streak and the best one before it', () => {
+  expect(cleanLine(1, 7)).toBe('✓ No mistakes. A new streak starts.')
+  expect(cleanLine(4, 12)).toBe('✓ No mistakes. 4 prompts in a row!')
+  expect(cleanLine(10, 12)).toBe('✓ No mistakes. 10 in a row, 3 more to beat your best.')
+  expect(cleanLine(12, 12)).toBe('✓ No mistakes. 12 in a row: you matched your best streak!')
+  expect(cleanLine(13, 12)).toBe('✓ No mistakes. 13 in a row: your best streak yet!')
+  expect(cleanLine(undefined, undefined)).toBe('✓ No mistakes.')
 })
 
 test('a check with no mistakes shows in the band and does not open the pane', async ($, on) => {
@@ -551,7 +620,7 @@ test('a check with no mistakes leaves an open pane open', async ($, on) => {
   await turn($, calls, [CHECK_TEXT], 't2')
   expect(calls.closed).toEqual([])
   const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ text: '✓ No mistakes. Great English, keep it up!' })).toBeDefined()
+  expect(await pane.find({ text: '✓ No mistakes. A new streak starts.' })).toBeDefined()
 })
 
 test('a Top mistakes row opens and closes its example card', async ($, on) => {
@@ -677,13 +746,12 @@ test('a data folder that cannot be written shows its warning, and the prompt goe
   expect(calls.toasts).toEqual(['Grammar tracker: cannot write to the data folder /x'])
 })
 
-test('the Top mistakes tab shows a ✗ icon for a recurring mistake, the tiles and the share of each type', async ($, on) => {
+test('the Top mistakes tab shows the recurring mistake to watch, the stats and the share of each type', async ($, on) => {
   engine(on, '')
   await pressBand($)
   const pane = await $.ui.mount(PANE)
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-top' })
   expect(await pane.find({ text: '1 mistake you keep repeating.' })).toBeDefined()
-  expect(await pane.find({ text: ' ✗ ' })).toBeDefined()
   expect(await pane.find({ text: /^Watch out for ".*" \(×3\)$/ })).toBeDefined()
   const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text)
   expect(texts).toEqual(
@@ -722,7 +790,7 @@ test('the footer key t switches between the tabs, and the tab on show is colored
   const keys = (await pane.findAll({ type: 'Button' }))
     .filter(b => b.props.hotkey !== undefined)
     .map(b => b.props.hotkey)
-  expect(keys).toEqual(['t', 'h'])
+  expect(keys).toEqual(['t', 'h', 'r'])
   await $.ui.press({ plugin: 'grammar-tracker', key: 'tab-next' })
   await pane.redraw()
   const shown = async () =>
@@ -746,69 +814,22 @@ test('the Top mistakes rows draw an icon and a bar as long as the count', async 
   expect(texts).toContain('░'.repeat(7))
 })
 
-test('the Last prompt tab shows the tiles and the trend of this conversation', async ($, on) => {
+test('the Last prompt tab shows four stats: mistakes, recurring, the streak and the best streak', async ($, on) => {
   const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
-  expect(calls.runs.some(run => run[2] === 'trend' && run[3] === 's1' && run[4] === '10')).toBe(true)
-  expect(await pane.find({ text: '2 mistakes, 1 you keep repeating.' })).toBeDefined()
-  expect(await pane.find({ text: 'Watch out for "does have" (×3)' })).toBeDefined()
-  const tiles = (await pane.findAll({ type: 'Box' })).filter(
+  const stats = (await pane.findAll({ type: 'Box' })).filter(
     b => b.props.borderStyle === 'round' && b.props.alignItems === 'center',
   )
-  expect(tiles.map(t => t.text.replace(/\s+/g, ' ').trim())).toEqual(['2Mistakes', '1Recurring', '2Clean streak'])
-  const bars = (await pane.findAll({ type: 'Text' })).filter(
-    t =>
-      '▁▂▃▄▅▆▇█'.includes(t.text) &&
-      t.text.length === 1 &&
-      (t.props.color === 'warning' || t.props.color === 'success'),
-  )
-  expect(bars.map(t => [t.text, t.props.color])).toEqual([
-    ['▅', 'warning'],
-    ['▁', 'success'],
-    ['█', 'warning'],
-    ['▁', 'success'],
-    ['▁', 'success'],
-  ])
-  expect(await pane.find({ text: ' last 5 prompts' })).toBeDefined()
+  expect(stats.map(t => t.text.replace(/\s+/g, ' ').trim())).toEqual(['2Mistakes', '1Recurring', '0Streak', '5Best'])
 })
 
-test('a check with no mistakes shows the clean streak', async ($, on) => {
-  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
+test('a check kept by an older version shows a dash for the streaks', async ($, on) => {
+  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, clean_streak: undefined, best_before: undefined }))
   await turn($, calls, [CHECK_TEXT])
   const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ text: '2 prompts in a row with no mistakes' })).toBeDefined()
-})
-
-test('the icon flips from ? to ✗ after a check with mistakes lands', async ($, on) => {
-  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
-  await turn($, calls, [CHECK_TEXT])
-  const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ text: ' ? ' })).toBeDefined()
-  await calls.clock.advance(500)
-  await pane.redraw()
-  expect(await pane.find({ text: ' ? ' })).toBeUndefined()
-  await calls.clock.advance(180)
-  await pane.redraw()
-  expect(await pane.find({ text: ' ✗ ' })).toBeDefined()
-})
-
-test('the icon flips to ✓ after a check with no mistakes lands', async ($, on) => {
-  const calls = engine(on, JSON.stringify({ ...SAVE_OUTPUT, occurrences: [] }))
-  await turn($, calls, [CHECK_TEXT])
-  await calls.clock.advance(680)
-  const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ text: ' ✓ ' })).toBeDefined()
-})
-
-test('a failed trend query shows a toast and a dash for the streak', async ($, on) => {
-  const calls = engine(on, JSON.stringify(SAVE_OUTPUT))
-  calls.isTrendBroken = true
-  await turn($, calls, [CHECK_TEXT])
-  expect(calls.toasts.some(t => t.startsWith('Grammar tracker: failed to read the trend ('))).toBe(true)
-  const pane = await $.ui.mount(PANE)
-  const tiles = (await pane.findAll({ type: 'Box' })).filter(
+  const stats = (await pane.findAll({ type: 'Box' })).filter(
     b => b.props.borderStyle === 'round' && b.props.alignItems === 'center',
   )
-  expect(tiles.map(t => t.text.replace(/\s+/g, ' ').trim()).at(-1)).toBe('–Clean streak')
+  expect(stats.map(t => t.text.replace(/\s+/g, ' ').trim()).slice(2)).toEqual(['–Streak', '–Best'])
 })

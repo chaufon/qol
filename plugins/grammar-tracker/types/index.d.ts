@@ -11,8 +11,19 @@ export interface Occurrence {
   isRecurring: boolean
 }
 
+/**
+ * A check of one prompt. `streak` is the number of prompts in a row with no mistakes that ends at this one, across every
+ * conversation, and `bestBefore` the longest streak before it; both are absent from a check kept by an older version.
+ */
 export type GrammarCheck =
-  { doesNotApply: true } | { doesNotApply: false; correctedPrompt: string; occurrences: Occurrence[] }
+  | { doesNotApply: true }
+  | {
+      doesNotApply: false
+      correctedPrompt: string
+      occurrences: Occurrence[]
+      streak?: number
+      bestBefore?: number
+    }
 
 export type PaneTab = 'last' | 'top'
 
@@ -27,14 +38,14 @@ declare module 'claude-code' {
       tab: PaneTab
       top: TopMistakes
       openRow: string | null
-      // The mistake count of each of the last prompts of this conversation, oldest first; null until loaded.
-      trend: number[] | null
+      // Whether the cards show their type's rule, set by the footer key; null follows the showTypeRules option.
+      rulesShown: boolean | null
+      // The cards of the last check whose own button turned their rule the other way, by cardId in hooks/draw.tsx.
+      flippedRules: string[]
       // True from the start of a turn until its check arrives or the turn ends.
       pending: boolean
       // True once the user hid the pane by hand, until the Show button opens it again. A check opens the pane only while it is false.
       manualHide: boolean
-      // The step of the icon's flip after a check lands: 0 shows "?", 3 shows the verdict and stays.
-      flipStep: number
     }
   }
 }

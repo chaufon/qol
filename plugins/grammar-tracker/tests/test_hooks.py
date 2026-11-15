@@ -199,7 +199,7 @@ def test_save_check_logs_failure_without_blocking(tmp_path):
 def test_save_check_reports_mistake_free_prompt(tmp_path):
     payload = {"input_mode": "typed", "corrected_prompt": "fine", "mistakes": []}
     out = run("save_check.py", save_payload(block(payload), prompt="fine"), tmp_path)
-    assert out == {"corrected_prompt": "fine", "occurrences": []}
+    assert out == {"corrected_prompt": "fine", "occurrences": [], "clean_streak": 1, "best_before": 0}
 
 
 def test_save_check_reads_check_after_progress_text_and_a_reply_still_streaming(tmp_path):

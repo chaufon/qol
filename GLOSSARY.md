@@ -66,5 +66,10 @@ The working directory a conversation started in, shown by its last path segment.
 _Avoid_: Repo, workspace
 
 **Card**:
-A bordered box in History that groups the conversations of one project, or of one 5-hour window.
+A bordered box with its title on its top border. In History, a card groups the conversations of one project, or of
+one 5-hour window; in grammar-tracker, a card holds one mistake.
 _Avoid_: Panel, tile
+
+**Stat**:
+A small bordered box with one number over its label, three or four to a row at the top of a pane tab.
+_Avoid_: Tile, KPI, card

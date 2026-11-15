@@ -26,7 +26,7 @@ Claude's reply streams: label + grammar-json block + answer
                                       │
                        band "✎ ✗ 3 mistakes · ⟳ 1 recurring   g: Hide"
                                       │ the pane opens, or Show, or ctrl+x tab then g
-                       pane: Last prompt (query.py trend) | Top mistakes (query.py top)
+                       pane: Last prompt (the check) | Top mistakes (query.py top)
 ```
 
 1. When the user submits a prompt, the hooks module runs `scripts/prompt_context.py` and attaches the text it prints
@@ -38,8 +38,8 @@ Claude's reply streams: label + grammar-json block + answer
 2. The hooks module watches the streamed reply of the main loop. When the `grammar-json` block closes, it runs
    `scripts/save_check.py` with the turn id, the conversation id, the folder, the prompt, the reply so far and the
    time the prompt was sent.
-3. `save_check.py` reads the block, saves it to `grammar.db`, and prints the corrected prompt and each mistake with its
-   reason and counter. The turn id is the key of the saved prompt, so a check is saved once.
+3. `save_check.py` reads the block, saves it to `grammar.db`, and prints the corrected prompt, each mistake with its
+   reason and counter, and the clean streak. The turn id is the key of the saved prompt, so a check is saved once.
 4. The band and the pane show the check at once. The mod hides the check from the reply on screen; the stored reply
    keeps it (ctrl+o shows it).
 5. `query.py rekey`, which runs at the start of each save, stores `prompt_uuid`, the id of the prompt in the
@@ -55,8 +55,7 @@ Claude's reply streams: label + grammar-json block + answer
 | `hooks/check.ts` | Reading the reply (`stripCheck`, `checkState`) and the scripts' JSON output |
 | `hooks/python.ts` | Finding Python (`python3`, then `py -3`, then `python`) and running a script |
 | `hooks/draw.tsx` | Drawing the band and the pane from plain props; no state of its own |
-| `hooks/format.ts` | Widths, bars, meters, sparklines, and the icon and color of each mistake type |
-| `hooks/icon.ts` | The pane icon: red E, blue N and a verdict square that flips from ? to a blue ✓ or a red ✗ |
+| `hooks/format.ts` | Widths, bars, meters, the words a correction changed, and the icon and color of each mistake type |
 | `hooks/*.test.ts` | Tests: pure modules tested directly, handlers through `claude-code/testing` |
 | `hooks/hooks.json` | Names the hooks module |
 | `types/index.d.ts` | Types of the mod's state |
@@ -67,7 +66,7 @@ Claude's reply streams: label + grammar-json block + answer
 | --- | --- |
 | `scripts/prompt_context.py` | Prints the grammar check instruction for a prompt |
 | `scripts/save_check.py` | Saves the reply's `grammar-json` block and prints the check with its counters |
-| `scripts/query.py` | Command-line queries on the database: `top`, `trend`, `rekey` |
+| `scripts/query.py` | Command-line queries on the database: `top`, `rekey` |
 | `scripts/lib/config.py` | Paths, native languages, the recurring threshold |
 | `scripts/lib/db.py` | Schema, migrations, saving and querying |
 | `scripts/lib/mistake_types.py` | The text of every mistake type, and the texts the migrations replace |
@@ -84,13 +83,19 @@ from the `qol` marketplace. `CLAUDE_PLUGIN_DATA` points the scripts at another f
 
 | Table | Holds |
 | --- | --- |
-| `prompts` | One row per checked prompt: turn id, transcript uuid, conversation id, time, folder, input mode, original and corrected text |
+| `prompts` | One row per checked prompt: turn id, transcript uuid, conversation id, time, folder, input mode, original and corrected text, clean streak |
 | `mistake_types` | The types of mistake that the instruction lists |
 | `mistakes` | One row per distinct mistake: its type and identifier |
 | `occurrences` | One row per time a mistake appears in a prompt: original and corrected sentence, reason |
 
 A mistake's counter is the number of its occurrences. A mistake is recurring when its counter reaches
 `RECURRING_THRESHOLD = 3` (`scripts/lib/config.py`).
+
+A prompt's clean streak (`prompts.clean_streak`) is the number of prompts in a row with no mistakes that ends at it,
+across every conversation, in the order the prompts were sent: 0 for a prompt with mistakes, and one more than the
+prompt sent before it otherwise. A prompt the check does not apply to is not saved, so it leaves the streak as it is.
+Saving a check counts the streak again for its prompt and every prompt sent after it, so a check saved after a later
+prompt's fixes theirs. `save_check.py` prints the streak and the best streak before the prompt.
 
 The schema has a version (`VERSION` in `scripts/lib/db.py`). Opening an older database runs the migrations up to the
 current version. A database newer than the mod refuses to open, and the error asks the user to update the mod.
@@ -124,12 +129,10 @@ value also writes a line to `errors.log`. A test keeps `NATIVE_LANGUAGES` equal 
 
 ```
 python3 scripts/query.py top [N]
-python3 scripts/query.py trend SESSION_ID [N]
 python3 scripts/query.py rekey
 ```
 
 - `top` prints the N mistakes with the largest counters (default 10) as JSON, each with its latest example.
-- `trend` prints the mistake count of each of the last N prompts of one conversation (default 10), oldest first.
 - `rekey` stores the transcript uuid of each saved prompt that has none, by matching the text and the closest time.
   Prompts with no match are tried again on the next run.
 
