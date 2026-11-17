@@ -3,10 +3,13 @@
 Learn English while you work with Claude Code. grammar-tracker checks the English of every prompt you write, shows
 your mistakes beside the chat as Claude answers, and counts the ones you keep repeating.
 
-It is built for Spanish, Portuguese, French and Italian speakers: the check looks for the mistakes speakers of your
-language make in English, such as calques and false friends.
+It is built for Spanish (well tested), Portuguese, French and Italian speakers: the check looks for the mistakes
+speakers of your language make in English, such as "I have 30 years" for "I am 30 years old", or "actually" meant as
+"currently".
 
-<!-- GIF: a prompt with mistakes, the band, and the pane opening while Claude answers -->
+![A prompt with mistakes, the band, and the pane opening while Claude answers](docs/media/check.gif)
+
+[Watch it with pause and seek on asciinema.org](https://asciinema.org/a/evqqxrNYPzILjGzB).
 
 ## Features
 
@@ -40,7 +43,7 @@ develop the mod.
 ## Requirements
 
 - Claude Code in a terminal.
-- Python 3.10 or newer on the `PATH` as `python3`, `py` or `python`, on Linux, macOS or Windows. Any install works
+- Python 3.10 or newer on the `PATH` as `python3`, `py` or `python`, on Linux (well tested), macOS or Windows. Any install works
   (python.org, Microsoft Store, Homebrew, a Linux package). The mod needs no Python package.
 
 ## Install
@@ -74,7 +77,8 @@ Write prompts as usual.
 
 ## Options
 
-Set them on the screen the install shows, or later in `/plugin` (manage the plugin, then configure it).
+Change them with `/plugin configure grammar-tracker@qol` at the Claude Code prompt. `/plugin install` can also ask for
+them when you install the mod.
 
 | Option | Default | Effect |
 | --- | --- | --- |
